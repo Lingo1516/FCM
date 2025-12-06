@@ -2,19 +2,29 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-import time
 
 # ==========================================
-# 0. 頁面初始化 (防止報錯的關鍵)
+# 0. 頁面初始化
 # ==========================================
-st.set_page_config(page_title="FCM 論文決策系統 (最終完整版)", layout="wide")
+st.set_page_config(page_title="FCM 論文決策系統 (顏色修復版)", layout="wide")
 
-# CSS 美化：讓論文報告看起來像真的學術文件
+# ★★★ 這裡就是修正的地方：加上 color: #000000 ★★★
 st.markdown("""
 <style>
     .chat-user { background-color: #DCF8C6; padding: 15px; border-radius: 15px; margin: 10px 0; text-align: right; color: black; }
     .chat-ai { background-color: #F8F9FA; padding: 20px; border-radius: 15px; margin: 10px 0; text-align: left; color: #2c3e50; border-left: 5px solid #3498db; }
-    .report-box { border: 1px solid #ddd; padding: 25px; border-radius: 5px; background-color: #ffffff; line-height: 1.8; font-family: "Times New Roman", serif; }
+    
+    /* 強制設定論文區塊的文字為黑色，避免在深色模式下變成「白字白底」 */
+    .report-box { 
+        border: 1px solid #ddd; 
+        padding: 25px; 
+        border-radius: 5px; 
+        background-color: #ffffff; 
+        color: #000000 !important; 
+        line-height: 1.8; 
+        font-family: "Times New Roman", serif; 
+    }
+    
     .stButton>button { width: 100%; border-radius: 5px; height: 3em; }
 </style>
 """, unsafe_allow_html=True)
@@ -49,7 +59,7 @@ if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
     st.session_state.chat_history.append({
         "role": "ai", 
-        "content": "系統已就緒。請先在「模擬運算」跑出數據，再點擊按鈕生成第四章與第五章。"
+        "content": "系統已修復顏色顯示問題。請先跑一次模擬，再點擊按鈕生成論文。"
     })
 
 # ==========================================
@@ -71,7 +81,6 @@ def run_fcm(W, A_init, lambd, steps, epsilon):
     return np.array(history)
 
 def sort_matrix_logic():
-    """強制排序功能：解決新增準則位置錯誤的問題"""
     df = pd.DataFrame(st.session_state.matrix, index=st.session_state.concepts, columns=st.session_state.concepts)
     df_sorted = df.sort_index(axis=0).sort_index(axis=1)
     st.session_state.concepts = df_sorted.index.tolist()
@@ -114,28 +123,39 @@ else:
             st.success("已完成 A-Z 排序")
             st.rerun()
 
+    # ★★★ 這裡加一個按鈕，以防你的矩陣變成全0 ★★★
+    if st.sidebar.button("⚠️ 恢復預設數據 (若圖跑不出來按此)"):
+        st.session_state.concepts = [
+            "A1 倫理文化", "A2 高層基調", "A3 倫理風險",
+            "B1 策略一致性", "B2 利害關係人", "B3 資訊透明",
+            "C1 社會影響", "C2 環境責任", "C3 治理法遵"
+        ]
+        mat = np.zeros((9, 9))
+        mat[1, 0] = 0.85; mat[1, 3] = 0.80; mat[1, 5] = 0.75
+        mat[5, 4] = 0.90; mat[2, 8] = 0.80; mat[3, 6] = 0.50; mat[3, 7] = 0.60
+        st.session_state.matrix = mat
+        st.rerun()
+
 LAMBDA = st.sidebar.slider("Lambda (敏感度)", 0.1, 5.0, 1.0)
 MAX_STEPS = st.sidebar.slider("模擬步數", 10, 100, 30)
 
 # ==========================================
-# 4. 主畫面 (Tabs 定義)
+# 4. 主畫面
 # ==========================================
-st.title("FCM 論文決策系統 (Full Version)")
-
-# ★★★ 這行是關鍵，一定要在這裡定義 ★★★
+st.title("FCM 論文決策系統 (Color Fixed)")
 tab1, tab2, tab3 = st.tabs(["📊 矩陣視圖", "📈 模擬運算", "🎓 論文寫作顧問"])
 
-# --- Tab 1: 矩陣 ---
+# --- Tab 1 ---
 with tab1:
     st.subheader("矩陣檢視")
     df_show = pd.DataFrame(st.session_state.matrix, index=st.session_state.concepts, columns=st.session_state.concepts)
     st.dataframe(df_show.style.background_gradient(cmap='RdBu', vmin=-1, vmax=1), height=400)
     st.download_button("下載 CSV", df_show.to_csv().encode('utf-8'), "matrix.csv")
 
-# --- Tab 2: 模擬 ---
+# --- Tab 2 ---
 with tab2:
     st.subheader("情境模擬")
-    st.info("💡 操作提示：請拉動 **A2 高層基調** 至 0.8 以上 (模擬策略介入)，再按開始運算。")
+    st.info("💡 請拉動 **A2 高層基調** 至 0.8 以上 (模擬策略介入)，再按開始運算。")
     
     cols = st.columns(3)
     initial_vals = []
@@ -155,21 +175,20 @@ with tab2:
         active_idx = [i for i in range(len(res[0])) if res[-1, i] > 0.01 or init_arr[i] > 0]
         
         if not active_idx:
-            st.warning("⚠️ 數值無變化，請嘗試增加初始投入。")
+            st.warning("⚠️ 數值無變化，請嘗試增加初始投入，或按側邊欄的「恢復預設數據」。")
         else:
             for i in active_idx:
                 ax.plot(res[:, i], label=st.session_state.concepts[i])
             ax.legend(bbox_to_anchor=(1.01, 1), loc='upper left')
             st.pyplot(fig)
 
-# --- Tab 3: AI 寫作核心 (按鈕生成版) ---
+# --- Tab 3 (修正顏色) ---
 with tab3:
     st.subheader("🤖 論文生成與深度分析")
     
     if st.session_state.last_results is None:
         st.error("⚠️ 請先回到「Tab 2 模擬運算」執行一次運算，這裡才有數據可以寫論文！")
     else:
-        # 準備數據
         results = st.session_state.last_results
         initial = st.session_state.last_initial
         final = results[-1]
@@ -178,25 +197,21 @@ with tab3:
         steps = results.shape[0]
         matrix = st.session_state.matrix
         
-        # 關鍵指標
         driver_idx = np.argmax(initial)
         driver_name = concepts[driver_idx]
         best_idx = np.argmax(growth)
         best_name = concepts[best_idx]
         
-        # 收斂步數
         convergence_step = steps
         for t in range(1, steps):
             if np.max(np.abs(results[t] - results[t-1])) < 0.001:
                 convergence_step = t
                 break
         
-        # 結構指標 (第四章用)
         out_degree = np.sum(np.abs(matrix), axis=1)
         struct_driver_idx = np.argmax(out_degree)
         struct_driver_name = concepts[struct_driver_idx]
 
-        # === 論文生成按鈕區 ===
         c1, c2, c3 = st.columns(3)
         b1 = c1.button("📝 生成第四章：驗證結果")
         b2 = c2.button("🎓 生成第五章：結論建議")
@@ -204,7 +219,6 @@ with tab3:
         
         report_content = ""
         
-        # === 生成邏輯 ===
         if b1 or b3:
             report_content += "### 📊 第四章：研究結果與驗證 (Chapter 4: Results and Verification)\n\n"
             report_content += "**4.1 結構特性分析 (Structural Analysis)**\n"
@@ -230,13 +244,10 @@ with tab3:
             report_content += "**5.3 學術貢獻**\n"
             report_content += "本研究利用 FCM 視覺化了 ESG 變數間的動態因果路徑，突破了傳統靜態分析的限制，為高階梯隊理論提供了新的實證支持。\n"
 
-        # 顯示報告
         if report_content:
             st.markdown(f'<div class="report-box">{report_content}</div>', unsafe_allow_html=True)
-            # 存入對話紀錄
             st.session_state.chat_history.append({"role": "ai", "content": report_content})
 
-    # 對話框保留 (給想問細節的人用)
     st.divider()
     st.caption("💬 補充問答")
     user_input = st.text_input("輸入問題 (例如：解釋每一個準則)", key="chat_in")
