@@ -4,60 +4,42 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # ==========================================
-# 1. 頁面基本設定
+# 1. 內建數據 (直接把你的 14x14 矩陣寫在這裡)
 # ==========================================
-st.set_page_config(page_title="FCM 分析工具", layout="wide")
-st.title("FCM 模糊認知圖分析器")
-st.markdown("""
-### 使用說明
-1. 請上傳包含權重矩陣的 **Excel (.xlsx)** 或 **CSV** 檔案。
-2. 檔案格式：**第一列**與**第一欄**必須是概念名稱 (Concepts)。
-""")
+# 這是從你的圖片辨識出來的數據
+concepts = [f"C{i+1}" for i in range(14)] # 暫時命名為 C1 到 C14
+weights = np.array([
+    [0, 0.65, 0.48, 0, 0, -0.4, 0.7, 0, 0, 0, 0, 0.7, 0, 0],       # C1
+    [0.7, 0, 0.8, 0, -0.2, -0.73, 0, 0, 0.7, 0, 0.63, 0, -0.3, 0], # C2
+    [0, 0.61, 0, 0.7, 0, 0, 0, -0.6, 0, 0, 0.3, 0, -0.4, 0],       # C3
+    [0.28, 0, 0, 0, 0, 0, -0.38, 0, 0, 0, 0, 0, 0, 0],             # C4
+    [0, -0.68, -0.68, 0, 0, 0, 0, 0.48, 0, 0.6, -0.58, -0.4, 0.33, -0.4], # C5
+    [-0.7, -0.73, -0.8, 0, 0, 0, 0, 0, -0.6, 0.4, -0.4, 0, 0.4, 0], # C6
+    [0.68, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0.43, -0.2, 0],           # C7
+    [0, -0.75, -0.6, 0, 0.65, 0.2, 0, 0, 0, 0, 0, -0.3, 0.9, 0],   # C8
+    [0.38, 0.6, 0.31, 0, -0.3, 0, 0, 0, 0, 0, 0.43, 0, 0, 0],      # C9
+    [0, 0.4, 0, 0, 0, -0.33, 0, 0, 0.4, 0, 0.45, 0, 0, 0.23],      # C10
+    [0, 0.41, 0.78, 0, -0.23, 0, 0, 0, 0.7, 0, 0, 0.33, 0, 0.38],  # C11
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],                    # C12 (看起來全0)
+    [-0.35, -0.68, -0.5, 0, 0.73, 0.73, 0, 0.6, 0, 0.3, 0, -0.73, 0, 0], # C13
+    [0, 0.25, 0, 0, -0.28, 0, 0, 0, 0, 0, 0, 0.28, 0, 0]           # C14
+])
 
 # ==========================================
-# 2. 側邊欄：參數設定
+# 2. 網頁介面設定
 # ==========================================
-st.sidebar.header("1. 參數設定 (Settings)")
+st.set_page_config(page_title="FCM 測試版", layout="wide")
+st.title("FCM 模糊認知圖 - 快速測試版")
+st.write("此版本已內建 14x14 矩陣數據，無需上傳檔案即可執行。")
+
+# 側邊欄參數
+st.sidebar.header("參數設定")
 LAMBDA = st.sidebar.slider("Lambda (敏感度)", 0.1, 5.0, 1.0, 0.1)
-MAX_STEPS = st.sidebar.slider("最大疊代次數", 10, 100, 50, 5)
+MAX_STEPS = st.sidebar.slider("模擬次數 (Steps)", 10, 100, 30, 1)
 EPSILON = 0.001
 
 # ==========================================
-# 3. 檔案上傳區 (核心修改處)
-# ==========================================
-st.sidebar.header("2. 資料上傳")
-uploaded_file = st.sidebar.file_uploader("上傳矩陣檔", type=['xlsx', 'csv'])
-
-# 預設變數 (如果沒上傳檔案時用的防呆機制)
-df = None
-weights = None
-concepts = []
-
-if uploaded_file is not None:
-    try:
-        # 判斷是 Excel 還是 CSV
-        if uploaded_file.name.endswith('.csv'):
-            df = pd.read_csv(uploaded_file, index_col=0)
-        else:
-            df = pd.read_excel(uploaded_file, index_col=0)
-            
-        # 抓取資料
-        concepts = df.columns.tolist()  # 抓取概念名稱
-        weights = df.values             # 抓取數值矩陣
-        
-        st.success(f"成功讀取檔案！偵測到 {len(concepts)} 個概念。")
-        
-        # 顯示讀取到的矩陣給使用者確認
-        with st.expander("點擊查看原始矩陣數據"):
-            st.dataframe(df)
-            
-    except Exception as e:
-        st.error(f"檔案讀取錯誤：{e}")
-else:
-    st.info("👈 請在左側上傳檔案以開始分析")
-
-# ==========================================
-# 4. FCM 運算引擎
+# 3. FCM 運算核心
 # ==========================================
 def sigmoid(x, lambd):
     return 1 / (1 + np.exp(-lambd * x))
@@ -65,77 +47,55 @@ def sigmoid(x, lambd):
 def run_fcm(W, A_init, lambd, steps, epsilon):
     history = [A_init]
     current_state = A_init
-    
     for _ in range(steps):
         influence = np.dot(current_state, W)
         next_state = sigmoid(influence, lambd)
         history.append(next_state)
-        
         if np.max(np.abs(next_state - current_state)) < epsilon:
             break
         current_state = next_state
-        
     return np.array(history)
 
 # ==========================================
-# 5. 執行模擬與繪圖
+# 4. 執行與顯示
 # ==========================================
-if df is not None:
-    st.sidebar.header("3. 情境模擬")
+if st.button('🚀 執行模擬 (Run Simulation)'):
+    # 預設初始狀態：假設 C1 (第一個概念) 被觸發，其他為 0
+    initial_state = np.zeros(14)
+    initial_state[0] = 1.0 
     
-    # 讓使用者設定每個概念的初始值 (自動產生拉桿)
-    st.sidebar.subheader("設定初始狀態 (0~1)")
-    initial_values = []
+    # 執行運算
+    results = run_fcm(weights, initial_state, LAMBDA, MAX_STEPS, EPSILON)
     
-    # 使用 Form 避免每次拉動都重新整理
-    with st.sidebar.form("init_form"):
-        for concept in concepts:
-            val = st.slider(f"{concept}", 0.0, 1.0, 0.5) # 預設0.5
-            initial_values.append(val)
-        submitted = st.form_submit_button("開始運算 (Run)")
-
-    if submitted:
-        initial_state = np.array(initial_values)
-        
-        # 執行運算
-        results = run_fcm(weights, initial_state, LAMBDA, MAX_STEPS, EPSILON)
-        
-        # 建立兩欄版面
-        col1, col2 = st.columns([2, 1])
-        
-        with col1:
-            st.subheader("趨勢圖 (Trends)")
-            fig, ax = plt.subplots(figsize=(10, 6))
-            
-            # 繪圖
-            for i, concept in enumerate(concepts):
-                ax.plot(results[:, i], label=concept, marker='o', markersize=4)
-            
-            ax.set_xlabel("Steps (Time)")
-            ax.set_ylabel("Activation Level")
-            ax.grid(True, linestyle='--', alpha=0.6)
-            
-            # 處理圖例位置，避免擋住線
-            ax.legend(bbox_to_anchor=(1.01, 1), loc='upper left')
-            st.pyplot(fig)
-
-        with col2:
-            st.subheader("最終穩定狀態")
-            final_state = results[-1]
-            # 製作結果表格並排序
-            res_df = pd.DataFrame({
-                "概念 (Concept)": concepts,
-                "最終值 (Value)": final_state
-            }).sort_values(by="最終值 (Value)", ascending=False)
-            
-            st.dataframe(res_df.style.background_gradient(cmap='Blues'), height=400)
-
-        # 下載結果功能
-        st.subheader("下載分析結果")
-        result_csv = pd.DataFrame(results, columns=concepts).to_csv(index=False).encode('utf-8')
-        st.download_button(
-            "下載詳細數據 (CSV)",
-            result_csv,
-            "fcm_results.csv",
-            "text/csv"
-        )
+    # --- 顯示圖表 ---
+    st.subheader("趨勢分析圖")
+    fig, ax = plt.subplots(figsize=(12, 6))
+    for i in range(14):
+        ax.plot(results[:, i], label=f"C{i+1}", alpha=0.7)
+    
+    ax.set_xlabel("時間 (Steps)")
+    ax.set_ylabel("激活程度 (Activation)")
+    ax.legend(bbox_to_anchor=(1.01, 1), loc='upper left', ncol=1)
+    ax.grid(True, linestyle='--', alpha=0.5)
+    st.pyplot(fig)
+    
+    # --- 顯示數據 ---
+    st.subheader("最終穩定狀態數據")
+    final_state = results[-1]
+    df_res = pd.DataFrame({
+        "概念代號": concepts,
+        "最終數值": final_state
+    }).sort_values(by="最終數值", ascending=False)
+    
+    st.dataframe(df_res)
+    
+    # --- 讓你下載整理好的 CSV ---
+    st.success("測試成功！如果你需要把這個內建的矩陣下載下來備份，請按下面按鈕：")
+    df_export = pd.DataFrame(weights, columns=concepts, index=concepts)
+    csv = df_export.to_csv().encode('utf-8')
+    st.download_button(
+        "📥 下載此矩陣為 CSV",
+        csv,
+        "fcm_matrix_14x14.csv",
+        "text/csv"
+    )
