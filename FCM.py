@@ -191,6 +191,7 @@ with tab2:
             st.session_state.last_results = res
             st.session_state.last_initial = init_arr
             
+            # 以下修正
             fig, ax = plt.subplots(figsize=(10, 5))
             for i in range(len(res[0])):
                 # 畫出有變化的線，或者初始值不為0的線
@@ -198,7 +199,7 @@ with tab2:
                     ax.plot(res[:, i], label=st.session_state.concepts[i])
             
             ax.set_ylim(0, 1.05)
-            ax.set_xlim(0, MAX_STEPS) # 強制顯示完整步數
+            ax.set_xlim(0, MAX_STEPS)  # 强制显示完整步数
             ax.set_ylabel("Activation (0-1)")
             ax.set_xlabel("Steps")
             ax.legend(bbox_to_anchor=(1.01, 1))
