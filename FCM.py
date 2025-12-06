@@ -2,25 +2,26 @@ import streamlit as st
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+import time
 
 # ==========================================
-# 0. 頁面初始化與樣式
+# 0. 頁面初始化 (一定要放在最第一行)
 # ==========================================
-st.set_page_config(page_title="FCM 論文決策系統", layout="wide")
+st.set_page_config(page_title="FCM 論文決策系統 (最終版)", layout="wide")
 
-# 自訂 CSS 讓報告更漂亮
+# 自訂 CSS: 讓聊天室和報告更漂亮
 st.markdown("""
 <style>
-    .report-box { background-color: #f0f2f6; border-left: 5px solid #4CAF50; padding: 15px; border-radius: 5px; margin-bottom: 10px; }
-    .academic-box { background-color: #e8f4f8; border-left: 5px solid #2196F3; padding: 15px; border-radius: 5px; }
-    .manage-box { background-color: #fff3e0; border-left: 5px solid #FF9800; padding: 15px; border-radius: 5px; }
+    .chat-user { background-color: #DCF8C6; padding: 10px; border-radius: 10px; margin: 5px; text-align: right; color: black;}
+    .chat-ai { background-color: #F1F0F0; padding: 10px; border-radius: 10px; margin: 5px; text-align: left; color: black;}
+    .report-card { border-left: 5px solid #2c3e50; background-color: #f8f9fa; padding: 15px; margin-bottom: 15px; border-radius: 5px; }
+    .concept-title { color: #2980b9; font-weight: bold; font-size: 16px; }
 </style>
 """, unsafe_allow_html=True)
 
 # ==========================================
-# 1. 初始化 Session State (記憶體)
+# 1. 初始化記憶體 (Session State)
 # ==========================================
-# 如果是第一次打開，載入預設的 9 大準則
 if 'concepts' not in st.session_state:
     st.session_state.concepts = [
         "A1 倫理文化", "A2 高層基調", "A3 倫理風險",
@@ -28,33 +29,38 @@ if 'concepts' not in st.session_state:
         "C1 社會影響", "C2 環境責任", "C3 治理法遵"
     ]
 
-# 初始化矩陣 (如果沒資料，自動填入論文邏輯，避免全是0)
+# 初始化矩陣 (寫入論文邏輯，避免全 0)
 if 'matrix' not in st.session_state:
-    # 建立 9x9
     mat = np.zeros((9, 9))
-    # === 寫入論文邏輯 (Hardcoded Logic) ===
-    # A2 高層基調 -> 驅動核心
-    mat[1, 0] = 0.85 # 影響倫理文化
-    mat[1, 3] = 0.80 # 影響策略一致性
-    mat[1, 5] = 0.75 # 影響資訊透明
-    # B3 資訊透明 -> 影響利害關係人
+    # A2 高層基調 -> 核心驅動
+    mat[1, 0] = 0.85 # -> A1
+    mat[1, 3] = 0.80 # -> B1
+    mat[1, 5] = 0.75 # -> B3
+    # B3 資訊透明 -> B2 利害關係人
     mat[5, 4] = 0.90
-    # A3 倫理風險 -> 影響治理法遵
+    # A3 倫理風險 -> C3 治理法遵
     mat[2, 8] = 0.80
-    # B1 策略一致 -> 影響績效
+    # B1 策略一致 -> C1, C2
     mat[3, 6] = 0.5
     mat[3, 7] = 0.6
-    
     st.session_state.matrix = mat
 
-# 儲存模擬結果供 AI 分析
+# 儲存模擬結果
 if 'last_results' not in st.session_state:
     st.session_state.last_results = None
-if 'last_initial' not in st.session_state:
     st.session_state.last_initial = None
 
+# ★★★ 關鍵修復：初始化對話紀錄 ★★★
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
+    # 預設第一條歡迎訊息
+    st.session_state.chat_history.append({
+        "role": "ai", 
+        "content": "您好，我是您的論文策略顧問。請先在「模擬運算」分頁跑出數據，然後我可以為您進行深度分析。\n\n您可以試著問我：「請解釋每一個準則的表現」或「目前的策略有什麼盲點？」"
+    })
+
 # ==========================================
-# 2. 核心函數 (排序、運算)
+# 2. 核心運算函數
 # ==========================================
 def sigmoid(x, lambd):
     return 1 / (1 + np.exp(-lambd * x))
@@ -71,23 +77,14 @@ def run_fcm(W, A_init, lambd, steps, epsilon):
         current_state = next_state
     return np.array(history)
 
-def sort_matrix():
-    """自動排序功能：新增準則後，按這個讓它歸位"""
-    df = pd.DataFrame(st.session_state.matrix, index=st.session_state.concepts, columns=st.session_state.concepts)
-    df_sorted = df.sort_index(axis=0).sort_index(axis=1)
-    st.session_state.concepts = df_sorted.index.tolist()
-    st.session_state.matrix = df_sorted.values
-
 # ==========================================
 # 3. 側邊欄 (設定區)
 # ==========================================
 st.sidebar.title("🛠️ 設定面板")
-
-# --- 資料來源選擇 ---
-mode = st.sidebar.radio("資料來源模式", ["使用內建論文模型", "上傳 Excel/CSV"])
+mode = st.sidebar.radio("資料來源", ["使用內建論文模型", "上傳 Excel/CSV"])
 
 if mode == "上傳 Excel/CSV":
-    uploaded = st.sidebar.file_uploader("請上傳矩陣檔", type=['xlsx', 'csv'])
+    uploaded = st.sidebar.file_uploader("上傳矩陣檔", type=['xlsx', 'csv'])
     if uploaded:
         try:
             if uploaded.name.endswith('.csv'):
@@ -96,70 +93,45 @@ if mode == "上傳 Excel/CSV":
                 df = pd.read_excel(uploaded, index_col=0)
             st.session_state.concepts = df.columns.tolist()
             st.session_state.matrix = df.values
-            st.sidebar.success(f"✅ 讀取成功 ({len(df)}x{len(df)})")
+            st.sidebar.success(f"讀取成功 ({len(df)}x{len(df)})")
         except Exception as e:
             st.sidebar.error(f"讀取失敗: {e}")
 else:
-    # 內建模式下的編輯功能
-    with st.sidebar.expander("➕ 新增準則 / 排序"):
-        new_c = st.text_input("輸入新準則 (如: A4 人才)")
+    with st.sidebar.expander("➕ 新增準則 / 編輯"):
+        new_c = st.text_input("輸入新準則名稱")
         if st.button("加入矩陣"):
             if new_c and new_c not in st.session_state.concepts:
                 st.session_state.concepts.append(new_c)
-                # 擴充矩陣補 0
                 old = st.session_state.matrix
                 r, c = old.shape
                 new_m = np.zeros((r+1, c+1))
                 new_m[:r, :c] = old
                 st.session_state.matrix = new_m
                 st.rerun()
-        
-        if st.button("🔄 自動排序 (A-Z)"):
-            sort_matrix()
-            st.success("已排序！")
-            st.rerun()
-    
-    if st.sidebar.button("🎲 隨機生成權重 (測試用)"):
-        n = len(st.session_state.concepts)
-        rand = np.random.uniform(-0.3, 0.8, (n, n))
-        np.fill_diagonal(rand, 0)
-        rand[np.abs(rand)<0.1] = 0
-        st.session_state.matrix = rand
-        st.sidebar.success("已生成隨機數據")
 
-st.sidebar.markdown("---")
 LAMBDA = st.sidebar.slider("Lambda (敏感度)", 0.1, 5.0, 1.0)
 MAX_STEPS = st.sidebar.slider("模擬步數", 10, 100, 30)
 
 # ==========================================
-# 4. 主畫面 (Tabs 分頁)
+# 4. 主畫面 (Tabs 分頁) - 修正 NameError 的關鍵
 # ==========================================
-st.title("FCM 論文決策系統")
+st.title("FCM 論文決策系統 (AI 完整版)")
 
-# 定義分頁 (解決 NameError 的關鍵)
-tab1, tab2, tab3 = st.tabs(["📊 矩陣視圖 (Matrix)", "📈 模擬運算 (Simulate)", "🎓 AI 論文顧問 (Analysis)"])
+# ★★★ 先定義 Tabs，確保後面都能讀到 ★★★
+tab1, tab2, tab3 = st.tabs(["📊 矩陣視圖 (Matrix)", "📈 模擬運算 (Simulate)", "🎓 AI 策略顧問 (Chatbot)"])
 
 # --- Tab 1: 矩陣視圖 ---
 with tab1:
-    st.subheader("檢視 / 編輯矩陣數值")
-    st.caption("這是系統目前的「大腦」。您可以下載它，修改後再上傳。")
-    
+    st.subheader("矩陣數值檢視")
     df_show = pd.DataFrame(st.session_state.matrix, index=st.session_state.concepts, columns=st.session_state.concepts)
     st.dataframe(df_show.style.background_gradient(cmap='RdBu', vmin=-1, vmax=1), height=400)
-    
-    st.download_button(
-        "📥 下載目前矩陣 (CSV)",
-        df_show.to_csv().encode('utf-8'),
-        "current_matrix.csv",
-        "text/csv"
-    )
+    st.download_button("📥 下載矩陣 CSV", df_show.to_csv().encode('utf-8'), "matrix.csv", "text/csv")
 
 # --- Tab 2: 模擬運算 ---
 with tab2:
-    st.subheader("情境模擬 (Scenario Analysis)")
-    st.info("💡 操作提示：請拉動下方拉桿 (例如將 A2 拉到 1.0)，然後按「開始運算」。")
+    st.subheader("情境模擬")
+    st.info("💡 請拉動下方拉桿 (設定初始策略)，再按「開始運算」。")
     
-    # 動態產生拉桿
     cols = st.columns(3)
     initial_vals = []
     for i, c in enumerate(st.session_state.concepts):
@@ -171,98 +143,133 @@ with tab2:
         init_arr = np.array(initial_vals)
         res = run_fcm(st.session_state.matrix, init_arr, LAMBDA, MAX_STEPS, 0.001)
         
-        # 存起來給 Tab 3 用
+        # 存入記憶體
         st.session_state.last_results = res
         st.session_state.last_initial = init_arr
         
-        # 畫圖
+        # 繪圖
         fig, ax = plt.subplots(figsize=(10, 5))
         active_idx = [i for i in range(len(res[0])) if res[-1, i] > 0.01 or init_arr[i] > 0]
         
         if not active_idx:
-            st.warning("⚠️ 圖表沒有變化？可能是矩陣權重全是 0，或是初始值沒拉。請檢查 Tab 1 或拉動 A2。")
+            st.warning("⚠️ 數值無變化，請嘗試增加初始投入或檢查矩陣。")
         else:
             for i in active_idx:
                 ax.plot(res[:, i], label=st.session_state.concepts[i], marker='o', markersize=4)
             ax.legend(bbox_to_anchor=(1.01, 1), loc='upper left')
             ax.grid(True, alpha=0.3)
-            ax.set_title("FCM 動態收斂圖")
-            ax.set_xlabel("Steps")
-            ax.set_ylabel("Activation (0-1)")
             st.pyplot(fig)
             
-            # 顯示結果表
+            # 結果表
             final_v = res[-1]
             df_res = pd.DataFrame({
                 "準則": st.session_state.concepts,
-                "初始投入": init_arr,
-                "最終產出": final_v,
-                "成長幅度": final_v - init_arr
-            }).sort_values("最終產出", ascending=False)
+                "初始": init_arr,
+                "最終": final_v,
+                "成長": final_v - init_arr
+            }).sort_values("最終", ascending=False)
             st.dataframe(df_res.style.background_gradient(cmap='Greens'))
 
-# --- Tab 3: AI 論文顧問 ---
+# --- Tab 3: AI 策略顧問 (深度對話版) ---
 with tab3:
-    st.subheader("🎓 模擬結果深度解析")
+    st.subheader("🤖 論文深度分析顧問")
     
-    if st.session_state.last_results is None:
-        st.warning("請先在「📈 模擬運算」分頁跑一次結果，我才能分析。")
-    else:
-        # 準備數據
-        results = st.session_state.last_results
-        final = results[-1]
-        initial = st.session_state.last_initial
-        concepts = st.session_state.concepts
-        
-        # 找出關鍵數據
-        driver_idx = np.argmax(initial) if np.sum(initial) > 0 else -1
-        driver_name = concepts[driver_idx] if driver_idx != -1 else "無特定策略"
-        
-        # 找出受益最大的 (排除自己)
-        growth = final - initial
-        growth[initial > 0.8] = 0 # 排除原本就很高的是
-        best_idx = np.argmax(growth)
-        best_name = concepts[best_idx]
-        
-        # === 自動生成論文段落 ===
-        st.markdown(f"""
-        <div class="report-box">
-        <b>📊 數據診斷：</b><br>
-        本次模擬以 <b>{driver_name}</b> 為主要驅動策略（初始投入={initial[driver_idx]:.1f}）。<br>
-        結果顯示，系統呈現連動反應，其中 <b>{best_name}</b> 的成長最為顯著（+{growth[best_idx]:.2f}），
-        驗證了兩者之間存在強烈的因果路徑。
-        </div>
-        """, unsafe_allow_html=True)
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown(f"""
-            <div class="academic-box">
-            <b>🏛️ 學術意涵 (Theoretical Implications)：</b><br><br>
-            1. <b>驗證高階梯隊理論：</b>模擬結果支持了領導者認知（{driver_name}）對組織結果的決定性影響。數據顯示該因子具備高度的「中心性 (Centrality)」。<br><br>
-            2. <b>路徑依賴效應：</b>從圖形收斂過程可見，治理機制的建立存在時間滯後性，這量化解釋了為何 ESG 轉型初期績效不明顯的現象。
-            </div>
-            """, unsafe_allow_html=True)
-            
-        with col2:
-            st.markdown(f"""
-            <div class="manage-box">
-            <b>💼 管理意涵 (Managerial Implications)：</b><br><br>
-            1. <b>槓桿策略選擇：</b>管理者應避免資源分散，建議集中資源強化 <b>{driver_name}</b>，利用其外溢效果帶動 <b>{best_name}</b> 的被動成長。<br><br>
-            2. <b>關鍵績效指標(KPI)設定：</b>不應僅關注財務結果，應將 {driver_name} 的落實程度納入先期指標，以確保長期永續目標的達成。
-            </div>
-            """, unsafe_allow_html=True)
-            
-        st.markdown("---")
-        st.subheader("💬 AI 策略問答")
-        user_q = st.text_input("輸入問題 (例如：這個策略有什麼缺點？如何改善 C2？)")
-        
-        if user_q:
-            st.write("🤖 **AI 分析：**")
-            if "缺點" in user_q or "風險" in user_q:
-                low_growth = [concepts[i] for i, g in enumerate(growth) if g < 0.05 and initial[i]==0]
-                st.error(f"分析發現：{', '.join(low_growth[:3])} 等項目的反應微弱。這代表目前的策略無法有效觸及這些領域，這是潛在的盲點。")
-            elif "改善" in user_q:
-                st.info(f"若要改善特定指標，建議不要直接強拉該指標的數值（治標），而是要強化矩陣中對該指標有「正向權重」的源頭因子。")
+    # 1. 顯示歷史對話 (解決「只能問一次」的問題)
+    chat_container = st.container()
+    with chat_container:
+        for msg in st.session_state.chat_history:
+            if msg["role"] == "user":
+                st.markdown(f'<div class="chat-user">👤 <b>您：</b>{msg["content"]}</div>', unsafe_allow_html=True)
             else:
-                st.success(f"這是一個好問題。根據目前的模擬數據，{driver_name} 確實是系統中最具影響力的槓桿點。建議在論文中強調此一發現。")
+                st.markdown(f'<div class="chat-ai">🤖 <b>AI：</b>{msg["content"]}</div>', unsafe_allow_html=True)
+
+    # 2. 輸入框
+    user_input = st.text_input("請輸入您的問題...", key="chat_input")
+    
+    # 3. AI 處理邏輯
+    if st.button("送出問題") and user_input:
+        # 記錄使用者的話
+        st.session_state.chat_history.append({"role": "user", "content": user_input})
+        
+        # 檢查是否有數據
+        if st.session_state.last_results is None:
+            response = "⚠️ 請先回到「模擬運算」分頁，執行一次模擬，我才有數據可以分析喔！"
+        else:
+            # 準備數據
+            results = st.session_state.last_results
+            final = results[-1]
+            initial = st.session_state.last_initial
+            concepts = st.session_state.concepts
+            matrix = st.session_state.matrix
+            growth = final - initial
+            
+            # === AI 邏輯核心 ===
+            response = ""
+            
+            # 模式 A: 使用者想看「每一個」準則的詳細解釋
+            if "每一個" in user_input or "全部" in user_input or "詳細" in user_input:
+                response += "### 📊 全方位深度診斷報告\n\n"
+                
+                for i, c in enumerate(concepts):
+                    # 分析每個準則的狀況
+                    g_val = growth[i]
+                    f_val = final[i]
+                    init_val = initial[i]
+                    
+                    # 找出是誰影響了它 (In-degree)
+                    influencers = []
+                    col_data = matrix[:, i]
+                    for idx, w in enumerate(col_data):
+                        if w > 0: influencers.append(f"{concepts[idx]}(+{w})")
+                    inf_str = ", ".join(influencers) if influencers else "無顯著外部驅動力"
+                    
+                    # 判斷學術意涵
+                    status = ""
+                    if init_val > 0.5:
+                        status = "🔴 主動策略投入點 (Driver)"
+                    elif g_val > 0.1:
+                        status = "🟢 高敏感度受惠者 (Highly Sensitive)"
+                    elif f_val < 0.1:
+                        status = "⚪ 邊緣因子 (Inactive)"
+                    else:
+                        status = "🔵 一般連動因子"
+
+                    # 組合文字
+                    response += f"#### {c} {status}\n"
+                    response += f"- **數據表現**：初始投入 {init_val:.1f} $\\rightarrow$ 最終收斂 {f_val:.2f} (成長 +{g_val:.2f})\n"
+                    response += f"- **因果來源**：其數值變化主要受到 [{inf_str}] 的驅動。\n"
+                    response += f"- **管理意涵**：{'此為本次模擬的核心策略，應持續監控其擴散效應。' if init_val > 0 else '此為被動受惠指標，無需直接投入資源，只需強化上游驅動因子即可提升。'}\n\n"
+                    
+                response += "\n💡 **總結**：建議論文中可將「主動策略投入點」與「高敏感度受惠者」作為因果路徑分析的重點。"
+
+            # 模式 B: 詢問盲點或缺點
+            elif "盲點" in user_input or "缺點" in user_input or "無效" in user_input:
+                # 找出投入了但沒反應的 (ROI低)
+                inefficient = []
+                for i, val in enumerate(initial):
+                    if val > 0 and growth[i] < 0.05:
+                        inefficient.append(concepts[i])
+                
+                # 找出完全沒動的
+                dead_nodes = [concepts[i] for i, f in enumerate(final) if f < 0.05]
+                
+                response += "### 🔍 策略盲點偵測\n\n"
+                if inefficient:
+                    response += f"**1. 低效率投資：** 您投入了 **{', '.join(inefficient)}**，但系統顯示其帶動效果不佳。這在學術上稱為「策略孤島 (Strategic Silo)」，暗示該準則缺乏對外的連結路徑。\n"
+                else:
+                    response += "**1. 投資效率：** 目前所有投入的策略皆有產生一定程度的擴散，無明顯浪費資源狀況。\n"
+                    
+                if dead_nodes:
+                    response += f"**2. 系統死角：** **{', '.join(dead_nodes[:3])}** 等指標數值過低。若這些是重要績效，代表目前的策略組合無法觸及這些領域，這是論文中可以探討的「改進空間」。"
+
+            # 模式 C: 一般回答
+            else:
+                best_idx = np.argmax(final)
+                driver_idx = np.argmax(initial)
+                response += f"根據模擬結果，**{concepts[best_idx]}** 是目前表現最好的指標。\n"
+                response += f"這主要是由 **{concepts[driver_idx]}** 所驅動的連鎖反應。\n\n"
+                response += "若您需要更詳細的個別分析，請輸入「解釋每一個準則」。"
+
+        # 記錄 AI 的話
+        st.session_state.chat_history.append({"role": "ai", "content": response})
+        st.rerun() # 強制刷新畫面，顯示最新對話
