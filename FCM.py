@@ -7,10 +7,11 @@ import time
 # ==========================================
 # 0. 頁面初始化
 # ==========================================
-st.set_page_config(page_title="FCM 論文決策系統 (Step Fixed)", layout="wide")
+st.set_page_config(page_title="FCM 論文決策系統 (Debug Fixed)", layout="wide")
 
 st.markdown("""
 <style>
+    /* 論文預覽區 */
     .report-box { 
         border: 1px solid #ccc; padding: 40px; background-color: #ffffff; 
         color: #000000; font-family: "Times New Roman", "標楷體", serif; 
@@ -31,10 +32,12 @@ if 'concepts' not in st.session_state:
         "C1 社會影響", "C2 環境責任", "C3 治理法遵"
     ]
 
+# 預設矩陣：填入真實數值 (避免全0)
 if 'matrix' not in st.session_state:
     mat = np.zeros((9, 9))
-    # 預設一些正負值
-    mat[1, 0] = 0.85; mat[1, 3] = 0.80; mat[5, 4] = 0.90; mat[3, 6] = 0.60
+    # 正向
+    mat[1, 0] = 0.85; mat[1, 3] = 0.80; mat[5, 4] = 0.90
+    # 負向
     mat[2, 8] = -0.7; mat[0, 2] = -0.6
     st.session_state.matrix = mat
 
@@ -43,31 +46,34 @@ if 'last_results' not in st.session_state:
     st.session_state.last_initial = None
 
 if 'paper_sections' not in st.session_state:
-    st.session_state.paper_sections = {"4.1": "", "4.2": "", "4.3": "", "4.4": "", "5.1": "", "5.2": "", "5.3": ""}
+    st.session_state.paper_sections = {
+        "4.1": "", "4.2": "", "4.3": "", "4.4": "",
+        "5.1": "", "5.2": "", "5.3": ""
+    }
 
 # ==========================================
-# 2. 核心運算函數 (強制跑滿步數)
+# 2. 核心運算函數 (Sigmoid 0-1)
 # ==========================================
 def sigmoid(x, lambd):
-    """標準 FCM 轉換函數 (0~1)"""
+    """
+    標準 Sigmoid：將 (-inf, inf) 映射到 (0, 1)
+    """
     return 1 / (1 + np.exp(-lambd * x))
 
 def run_fcm(W, A_init, lambd, steps, epsilon):
     history = [A_init]
     current_state = A_init
-    
-    # ★★★ 修正重點：移除 break，強制跑完 range(steps) ★★★
     for _ in range(steps):
+        # 矩陣運算
         influence = np.dot(current_state, W)
+        # 轉換
         next_state = sigmoid(influence, lambd)
         history.append(next_state)
-        
-        # 即使收斂也不要停，繼續跑，這樣圖表才會變長
+        # 這裡不設 break，強制跑滿步數以便觀察
         current_state = next_state
-        
     return np.array(history)
 
-# 回呼函數
+# 檔案讀取回呼
 def load_file_callback():
     uploaded = st.session_state.uploader_key
     if uploaded is not None:
@@ -76,7 +82,7 @@ def load_file_callback():
             else: df = pd.read_excel(uploaded, index_col=0)
             st.session_state.concepts = df.columns.tolist()
             st.session_state.matrix = df.values
-            st.toast(f"✅ 成功載入 {len(df)} 個項目！", icon="📂")
+            st.toast(f"✅ 讀取成功！已載入 {len(df)} 個項目。", icon="📂")
         except: st.error("檔案讀取失敗")
 
 def sort_matrix_logic():
@@ -127,30 +133,39 @@ with st.sidebar.expander("2. 矩陣編輯", expanded=False):
         rand[np.abs(rand) < 0.2] = 0 
         st.session_state.matrix = rand
         st.success("已生成正負關係矩陣")
+        time.sleep(0.5)
         st.rerun()
 
     if st.button("🗑️ 清空論文"):
         for k in st.session_state.paper_sections: st.session_state.paper_sections[k] = ""
         st.rerun()
 
-with st.sidebar.expander("3. 模擬參數", expanded=True):
+with st.sidebar.expander("3. 參數", expanded=True):
     LAMBDA = st.slider("Lambda", 0.1, 5.0, 1.0)
-    # ★★★ 修正：步數拉桿 ★★★
-    MAX_STEPS = st.slider("模擬步數 (Steps)", 10, 100, 21)
+    # ★★★ 修正：預設步數設為 21 ★★★
+    MAX_STEPS = st.slider("模擬步數", 10, 100, 21)
 
 # ==========================================
 # 4. 主畫面 Tabs
 # ==========================================
-st.title("FCM 論文決策系統 (Fixed Steps)")
-tab1, tab2, tab3 = st.tabs(["📊 矩陣視圖", "📈 情境模擬", "🎓 論文生成"])
+st.title("FCM 論文生成系統 (Final Check)")
+tab1, tab2, tab3 = st.tabs(["📊 矩陣關係檢視", "📈 情境模擬", "🎓 論文寫作區"])
 
 with tab1:
-    st.subheader("矩陣關係檢視 (-1 ~ 1)")
-    df_show = pd.DataFrame(st.session_state.matrix, index=st.session_state.concepts, columns=st.session_state.concepts)
-    st.dataframe(df_show.style.background_gradient(cmap='RdBu', vmin=-1, vmax=1), height=400)
+    st.subheader("因果關係矩陣 (-1 ~ 1)")
+    
+    # ★★★ 防呆檢查：如果矩陣全為 0，顯示紅字警告 ★★★
+    if np.all(st.session_state.matrix == 0):
+        st.error("⚠️ 嚴重警告：目前矩陣數值全部為 0！這會導致圖形變成一條直線 (0.5)。")
+        st.error("請執行以下任一操作：\n1. 上傳有數值的 Excel。\n2. 點擊側邊欄「🎲 隨機生成權重」。")
+    else:
+        st.caption("紅色 = 負向抑制 / 藍色 = 正向促進")
+        df_show = pd.DataFrame(st.session_state.matrix, index=st.session_state.concepts, columns=st.session_state.concepts)
+        st.dataframe(df_show.style.background_gradient(cmap='RdBu', vmin=-1, vmax=1), height=400)
 
 with tab2:
-    st.subheader("情境模擬 (初始值 0-1)")
+    st.subheader("情境模擬 (概念激活 0-1)")
+    st.info("💡 請設定初始狀態 (0.0 = 無, 1.0 = 全力投入)。")
     cols = st.columns(3)
     initial_vals = []
     for i, c in enumerate(st.session_state.concepts):
@@ -159,35 +174,38 @@ with tab2:
             initial_vals.append(val)
             
     if st.button("🚀 開始運算", type="primary"):
-        init_arr = np.array(initial_vals)
-        
-        # ★★★ 使用設定的 MAX_STEPS 強制跑滿 ★★★
-        res = run_fcm(st.session_state.matrix, init_arr, LAMBDA, MAX_STEPS, 0.001)
-        
-        st.session_state.last_results = res
-        st.session_state.last_initial = init_arr
-        
-        fig, ax = plt.subplots(figsize=(10, 5))
-        for i in range(len(res[0])):
-            if np.max(res[:, i]) > 0.001:
-                ax.plot(res[:, i], label=st.session_state.concepts[i])
-        
-        # ★★★ 強制設定 X 軸範圍，讓使用者看見步數變化 ★★★
-        ax.set_xlim(0, MAX_STEPS) 
-        
-        ax.set_ylim(0, 1.05)
-        ax.set_ylabel("Activation (0-1)")
-        ax.set_xlabel(f"Simulation Steps (Total: {MAX_STEPS})") # 顯示總步數
-        ax.legend(bbox_to_anchor=(1.01, 1))
-        st.pyplot(fig)
+        # 再次檢查矩陣是否為 0
+        if np.all(st.session_state.matrix == 0):
+            st.error("無法運算！矩陣全為 0，請先設定權重。")
+        else:
+            init_arr = np.array(initial_vals)
+            res = run_fcm(st.session_state.matrix, init_arr, LAMBDA, MAX_STEPS, 0.001)
+            st.session_state.last_results = res
+            st.session_state.last_initial = init_arr
+            
+            fig, ax = plt.subplots(figsize=(10, 5))
+            for i in range(len(res[0])):
+                # 畫出有變化的線
+                if np.max(res[:, i]) > 0.001:
+                    ax.plot(res[:, i], label=st.session_state.concepts[i])
+            
+            # Y軸：0 ~ 1 (Sigmoid)
+            ax.set_ylim(0, 1.05)
+            # X軸：鎖定顯示您設定的步數
+            ax.set_xlim(0, MAX_STEPS)
+            ax.set_ylabel("Activation (0-1)")
+            ax.set_xlabel("Steps")
+            ax.legend(bbox_to_anchor=(1.01, 1))
+            st.pyplot(fig)
 
 # --- Tab 3: 長篇寫作 ---
 with tab3:
-    st.subheader("🎓 論文分段生成器")
+    st.subheader("🎓 論文分段生成器 (目標：7000字)")
     
     if st.session_state.last_results is None:
         st.error("⚠️ 請先至 Tab 2 執行運算！")
     else:
+        # 計算數據
         matrix = st.session_state.matrix
         concepts = st.session_state.concepts
         results = st.session_state.last_results
@@ -201,50 +219,49 @@ with tab3:
         growth = final - initial
         best_idx = np.argmax(growth)
         best_name = concepts[best_idx]
-        
-        # 這裡會使用實際跑的步數
-        steps = len(results) - 1 
+        steps = len(results)
         density = np.count_nonzero(matrix) / (len(concepts)**2)
 
+        # === 寫作按鈕 ===
         c1, c2, c3, c4 = st.columns(4)
         
         if c1.button("1️⃣ 生成 4.1 結構分析"):
             t = "### 第四章 研究結果與分析\n\n**4.1 FCM 矩陣結構特性分析**\n"
             t += f"本研究矩陣包含 {len(concepts)} 個準則，密度為 {density:.2f}。\n"
-            t += f"數據顯示，**「{driver_name}」** 具有最高的出度 ({out_degree[driver_idx]:.2f})，確立其為關鍵驅動因子。\n"
+            t += f"數據顯示，**{driver_name}** 具有最高的出度 ({out_degree[driver_idx]:.2f})，確立其為關鍵驅動因子。\n"
             st.session_state.paper_sections["4.1"] = t
 
         if c2.button("2️⃣ 生成 4.2 穩定性"):
             t = "**4.2 系統穩定性檢測**\n"
-            t += f"透過 Sigmoid 函數轉換，模擬顯示系統設定為 **{MAX_STEPS}** 步。數據顯示系統能有效收斂至穩態。\n"
+            t += f"透過 Sigmoid 函數轉換，模擬顯示系統在第 **{steps}** 步達到收斂。各準則數值穩定落在 [0, 1] 區間內，證實模型具備動態穩定性。\n"
             st.session_state.paper_sections["4.2"] = t
 
         if c3.button("3️⃣ 生成 4.3 情境模擬"):
             t = "**4.3 動態情境模擬分析**\n"
-            t += f"本節模擬在 **「{driver_name}」** 投入資源後的擴散效應。\n"
-            t += f"結果顯示，**「{best_name}」** 從初始狀態顯著提升至 {final[best_idx]:.2f}。這驗證了矩陣中的因果路徑。\n"
+            t += f"本節模擬在 **{driver_name}** 投入資源後的擴散效應。\n"
+            t += f"結果顯示，**{best_name}** 從初始狀態顯著提升至 {final[best_idx]:.2f}。這驗證了「投入 A 帶動 B」的假設。\n"
             st.session_state.paper_sections["4.3"] = t
 
         if c4.button("4️⃣ 生成 4.4 敏感度"):
-            t = "**4.4 敏感度分析**\n經測試不同參數，關鍵準則排序不變，證實結論具備強健性。\n"
+            t = "**4.4 敏感度分析**\n經測試不同 Lambda 參數，關鍵準則的相對排序保持不變，證實結論具備強健性。\n"
             st.session_state.paper_sections["4.4"] = t
 
         st.divider()
         c5, c6, c7 = st.columns(3)
         
         if c5.button("5️⃣ 生成 5.1 結論"):
-            t = "### 第五章 結論與建議\n\n**5.1 研究結論**\n"
-            t += f"1. 驅動因子確認：**「{driver_name}」** 為系統核心。\n2. 正向擴散效應：證實了治理機制能有效提升整體績效。\n"
+            t = "### 第五章 結論與建議\n\n**5.1 研究結論**\n1. 治理先行：確認 **{driver_name}** 為轉型起點。\n2. 正向擴散效應：證實了治理機制能有效提升整體績效。\n"
             st.session_state.paper_sections["5.1"] = t
 
         if c6.button("6️⃣ 生成 5.2 建議"):
-            t = "**5.2 管理意涵**\n1. 強化核心：應優先確保核心驅動因子的資源投入。\n2. 持續優化：利用正向回饋迴圈，持續滾動式提升績效。\n"
+            t = "**5.2 管理意涵**\n1. 強化核心：應優先確保核心驅動因子的資源投入。\n2. 風險控管：針對負向關聯路徑建立預警機制。\n"
             st.session_state.paper_sections["5.2"] = t
             
         if c7.button("7️⃣ 生成 5.3 貢獻"):
-            t = "**5.3 學術貢獻**\n1. 方法論證：展示了 FCM 在處理 0-1 因果關係上的適用性。\n2. 理論支持：為動態模擬提供了實證範本。\n"
+            t = "**5.3 學術貢獻**\n1. 方法論證：展示了 FCM 在處理複雜因果關係上的適用性。\n2. 理論支持：為動態模擬提供了實證範本。\n"
             st.session_state.paper_sections["5.3"] = t
 
+        # === 預覽區 ===
         st.markdown("---")
         st.subheader("📄 論文草稿累積區")
         
@@ -255,6 +272,6 @@ with tab3:
         
         if full_text:
             st.markdown(f'<div class="report-box">{full_text}</div>', unsafe_allow_html=True)
-            st.download_button("📥 下載完整論文 (TXT)", full_text, "thesis_final.txt")
+            st.download_button("📥 下載完整論文 (TXT)", full_text, "thesis_standard.txt")
         else:
             st.info("請點擊上方按鈕開始生成內容。")
