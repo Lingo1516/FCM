@@ -78,5 +78,8 @@ if st.button("生成 4.1 結構分析"):
     st.session_state.paper_sections["4.1"] = t
     st.write(t)
 
-# 下载文件
-st.download_button("📥 下載完整論文 (TXT)", t, "thesis_final.txt")
+# 下載完整論文內容
+if 't' in locals() and t:
+    st.download_button("📥 下載完整論文 (TXT)", t, "thesis_final.txt")
+else:
+    st.error("生成的內容為空，請先生成內容再下載。")
