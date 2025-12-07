@@ -186,22 +186,29 @@ with tab2:
             st.error("無法運算！矩陣是空的。")
         else:
             init_arr = np.array(initial_vals)
-            res = run_fcm(st.session_state.matrix, init_arr, LAMBDA, MAX_STEPS, INERTIA)
+            res = run_fcm(st.session_state.matrix, init_arr, 1.0, 21, 0.5)  # 假設步數為 21 步
+            
             st.session_state.last_results = res
             st.session_state.last_initial = init_arr
             
-            # 以下修正
+            # 以下修正：图形样式
             fig, ax = plt.subplots(figsize=(10, 6))
-            for i in range(res.shape[1]):
-                # 畫出有變化的線，或者初始值不為0的線
-                if np.max(np.abs(res[:, i] - 0.5)) > 0.01 or init_arr[i] > 0:
-                    ax.plot(res[:, i], label=st.session_state.concepts[i])
             
+            # 设置颜色和线条样式，模拟类似你的示例图
+            line_styles = ['-', '--', '-.', ':', '-', '--', '-.', ':', '-', '--', '-.', ':', '-']
+            colors = ['b', 'g', 'r', 'c', 'm', 'y', 'k', 'b', 'g', 'r', 'c', 'm', 'y']
+            
+            for i in range(res.shape[1]):
+                ax.plot(res[:, i], label=st.session_state.concepts[i], linestyle=line_styles[i % len(line_styles)], color=colors[i % len(colors)])
+
             ax.set_ylim(0, 1.05)
-            ax.set_xlim(0, MAX_STEPS)  # 强制显示完整步数
+            ax.set_xlim(0, 21)  # 强制显示完整步数
             ax.set_ylabel("Activation (0-1)")
             ax.set_xlabel("Steps")
-            ax.legend(loc="best")
+            ax.legend(bbox_to_anchor=(1.01, 1), loc='upper left', title="Concepts")
+            ax.set_facecolor('lightgray')  # 设置背景色为灰色
+            plt.title('模糊認知圖模擬結果')  # 图表标题
+
             st.pyplot(fig)
 
 # --- Tab 3: 長篇寫作 ---
