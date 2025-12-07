@@ -1,6 +1,5 @@
 import streamlit as st
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 import time
 
@@ -54,7 +53,7 @@ def sigmoid(x, lambd=1):
     """標準 Sigmoid (0~1)"""
     return 1 / (1 + np.exp(-lambd * x))
 
-def run_fcm(W, A_init, lambd, steps):
+def run_fcm(W, A_init, lambd, steps, inertia=0.5):
     history = [A_init]
     current_state = A_init
 
@@ -65,10 +64,8 @@ def run_fcm(W, A_init, lambd, steps):
         # 2. 轉換函數
         new_val = sigmoid(influence, lambd)
         
-        # ★★★ 關鍵修正：加入 50% 慣性 (Self-Memory) ★★★
-        # 這會讓圖形呈現漂亮的弧線，而不是直線跳動
-        # 公式：下個狀態 = 0.5 * 舊狀態 + 0.5 * 新計算值
-        next_state = 0.5 * current_state + 0.5 * new_val
+        # ★★★ 關鍵修正：加入慣性 (Self-Memory)，並調整慣性比例
+        next_state = inertia * current_state + (1 - inertia) * new_val
         
         history.append(next_state)
         
@@ -152,6 +149,7 @@ with st.sidebar.expander("2. 矩陣編輯", expanded=False):
 with st.sidebar.expander("3. 模擬參數", expanded=True):
     LAMBDA = st.slider("Lambda", 0.1, 5.0, 1.0)
     MAX_STEPS = st.slider("模擬步數", 10, 100, 21)
+    INERTIA = st.slider("慣性 (Self-Memory)", 0.1, 1.0, 0.5)
 
 # ==========================================
 # 4. 主畫面 Tabs
@@ -187,7 +185,7 @@ with tab2:
             st.error("無法運算！矩陣是空的。")
         else:
             init_arr = np.array(initial_vals)
-            res = run_fcm(st.session_state.matrix, init_arr, LAMBDA, MAX_STEPS)
+            res = run_fcm(st.session_state.matrix, init_arr, LAMBDA, MAX_STEPS, INERTIA)
             st.session_state.last_results = res
             st.session_state.last_initial = init_arr
             
@@ -276,12 +274,4 @@ with tab3:
         st.subheader("📄 論文草稿累積區")
         
         full_text = ""
-        for k in ["4.1", "4.2", "4.3", "4.4", "5.1", "5.2", "5.3"]:
-            if st.session_state.paper_sections.get(k):
-                full_text += st.session_state.paper_sections[k] + "\n\n"
-        
-        if full_text:
-            st.markdown(f'<div class="report-box">{full_text}</div>', unsafe_allow_html=True)
-            st.download_button("📥 下載完整論文 (TXT)", full_text, "thesis_final.txt")
-        else:
-            st.info("請點擊上方按鈕開始生成內容。")
+        for k in ["4.1", "4.2",
