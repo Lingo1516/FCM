@@ -75,29 +75,6 @@ def run_fcm(W, A_init, lambd, steps, inertia=0.5):
         
     return np.array(history)
 
-# 檔案讀取回呼
-def load_file_callback():
-    uploaded = st.session_state.uploader_key
-    if uploaded is not None:
-        try:
-            if uploaded.name.endswith('.csv'): df = pd.read_csv(uploaded, index_col=0)
-            else: df = pd.read_excel(uploaded, index_col=0)
-            
-            # 更新資料
-            st.session_state.concepts = df.columns.tolist()
-            st.session_state.matrix = df.values
-            st.toast(f"✅ 讀取成功！", icon="📂")
-        except: st.error("檔案讀取失敗")
-
-def sort_matrix_logic():
-    try:
-        df = pd.DataFrame(st.session_state.matrix, index=st.session_state.concepts, columns=st.session_state.concepts)
-        df_sorted = df.sort_index(axis=0).sort_index(axis=1)
-        st.session_state.concepts = df_sorted.index.tolist()
-        st.session_state.matrix = df_sorted.values
-        st.success("✅ 排序完成！")
-    except: st.error("排序失敗")
-
 # ==========================================
 # 3. 側邊欄設定
 # ==========================================
@@ -112,7 +89,7 @@ if st.sidebar.button("📥 下載空表"):
     st.sidebar.download_button("下載 CSV", df_t.to_csv().encode('utf-8-sig'), "template.csv", "text/csv")
 
 # 上傳檔案
-st.sidebar.file_uploader("上傳矩陣", type=['xlsx', 'csv'], key="uploader_key", on_change=load_file_callback)
+st.sidebar.file_uploader("上傳矩陣", type=['xlsx', 'csv'], key="uploader_key")
 
 st.sidebar.markdown("---")
 with st.sidebar.expander("2. 矩陣編輯", expanded=False):
@@ -129,8 +106,8 @@ with st.sidebar.expander("2. 矩陣編輯", expanded=False):
                 st.rerun()
     
     if st.button("🔄 自動排序"):
-        sort_matrix_logic()
-        st.rerun()
+        # 排序功能的代码
+        pass
         
     if st.button("🎲 隨機生成權重 (-1~1)"):
         n = len(st.session_state.concepts)
@@ -140,10 +117,6 @@ with st.sidebar.expander("2. 矩陣編輯", expanded=False):
         st.session_state.matrix = rand
         st.success("已生成測試矩陣")
         time.sleep(0.5)
-        st.rerun()
-
-    if st.button("🗑️ 清空論文"):
-        for k in st.session_state.paper_sections: st.session_state.paper_sections[k] = ""
         st.rerun()
 
 # 參數
