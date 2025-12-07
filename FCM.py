@@ -1,5 +1,6 @@
 import streamlit as st
 import numpy as np
+import pandas as pd
 import matplotlib.pyplot as plt
 import time
 
@@ -274,4 +275,12 @@ with tab3:
         st.subheader("📄 論文草稿累積區")
         
         full_text = ""
-        for k in ["4.1", "4.2",
+        for k in ["4.1", "4.2", "4.3", "4.4", "5.1", "5.2", "5.3"]:
+            if st.session_state.paper_sections.get(k):
+                full_text += st.session_state.paper_sections[k] + "\n\n"
+        
+        if full_text:
+            st.markdown(f'<div class="report-box">{full_text}</div>', unsafe_allow_html=True)
+            st.download_button("📥 下載完整論文 (TXT)", full_text, "thesis_final.txt")
+        else:
+            st.info("請點擊上方按鈕開始生成內容。")
