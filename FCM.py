@@ -1,6 +1,5 @@
 import streamlit as st
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 import time
 
@@ -50,14 +49,14 @@ if 'paper_sections' not in st.session_state:
 # ==========================================
 # 2. 核心運算函數 (加入慣性，讓曲線變圓滑)
 # ==========================================
-def sigmoid(x, lambd):
+def sigmoid(x, lambd=1):
     """標準 Sigmoid (0~1)"""
     return 1 / (1 + np.exp(-lambd * x))
 
-def run_fcm(W, A_init, lambd, steps, epsilon):
+def run_fcm(W, A_init, lambd, steps):
     history = [A_init]
     current_state = A_init
-    
+
     for _ in range(steps):
         # 1. 計算總輸入
         influence = np.dot(current_state, W)
@@ -187,13 +186,13 @@ with tab2:
             st.error("無法運算！矩陣是空的。")
         else:
             init_arr = np.array(initial_vals)
-            res = run_fcm(st.session_state.matrix, init_arr, LAMBDA, MAX_STEPS, 0.001)
+            res = run_fcm(st.session_state.matrix, init_arr, LAMBDA, MAX_STEPS)
             st.session_state.last_results = res
             st.session_state.last_initial = init_arr
             
             # 以下修正
-            fig, ax = plt.subplots(figsize=(10, 5))
-            for i in range(len(res[0])):
+            fig, ax = plt.subplots(figsize=(10, 6))
+            for i in range(res.shape[1]):
                 # 畫出有變化的線，或者初始值不為0的線
                 if np.max(np.abs(res[:, i] - 0.5)) > 0.01 or init_arr[i] > 0:
                     ax.plot(res[:, i], label=st.session_state.concepts[i])
@@ -202,7 +201,7 @@ with tab2:
             ax.set_xlim(0, MAX_STEPS)  # 强制显示完整步数
             ax.set_ylabel("Activation (0-1)")
             ax.set_xlabel("Steps")
-            ax.legend(bbox_to_anchor=(1.01, 1))
+            ax.legend(loc="best")
             st.pyplot(fig)
 
 # --- Tab 3: 長篇寫作 ---
