@@ -1,2 +1,5 @@
 streamlit
-python-pptx
+groq
+google-generativeai
+pandas
+matplotlib
