@@ -4,18 +4,19 @@ import google.generativeai as genai
 import string
 from io import BytesIO
 
-# --- 1. 設定您的 API Key (已內建) ---
-# ⚠️ 安全警告：這把鑰匙是您的私密資訊，請勿將此程式碼發布到公開網路 (GitHub/論壇)
-USER_API_KEY = "AIzaSyBlj24gBVr3RJhkukS9p6yo5s2-WVBH2H0"
+# --- 1. 設定您的 API Key ---
+# ⚠️ 請在下方引號內貼上你的 AIza 開頭金鑰
+USER_API_KEY = "這裡貼上你的AIza開頭金鑰" 
 
 # 設定 Google Gemini
-genai.configure(api_key=USER_API_KEY)
+if USER_API_KEY:
+    genai.configure(api_key=USER_API_KEY)
 
 # --- 2. 頁面設定 ---
-st.set_page_config(page_title="AI 文獻分析器 (自動版)", layout="wide", page_icon="🤖")
+st.set_page_config(page_title="AI 文獻分析器 (穩定版)", layout="wide", page_icon="🤖")
 
-st.title("🤖 AI 智慧文獻分析器")
-st.markdown("### 已內建金鑰，直接貼上文獻即可開始分析")
+st.title("🤖 AI 智慧文獻分析器 (Gemini Pro)")
+st.markdown("### 已切換至穩定版模型，請貼上文獻")
 
 # --- 3. 輸入區 ---
 st.info("👇 請將文獻資料貼在下方 (每一篇請記得 **按 Enter 換行**)")
@@ -23,8 +24,8 @@ raw_text = st.text_area("文獻輸入區", height=300, placeholder="直接把亂
 
 # --- 4. 核心邏輯：呼叫 Google AI ---
 def get_ai_analysis(text):
-    # 使用免費快速的 Flash 模型
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    # 修正重點：改用支援度最廣的 'gemini-pro'，避免 404 錯誤
+    model = genai.GenerativeModel('gemini-pro')
     
     prompt = f"""
     你是一位學術研究專家。請閱讀以下文獻內容，幫我歸納出 10 到 15 個最重要的「研究構面」或「評估準則」。
@@ -35,7 +36,7 @@ def get_ai_analysis(text):
     3. 直接輸出名詞，用「、」頓號隔開。不要有任何開場白或結尾。
     
     【文獻內容】：
-    {text[:10000]} 
+    {text[:8000]} 
     """
     
     try:
@@ -61,10 +62,12 @@ def parse_text(text):
 
 # --- 6. 執行按鈕 ---
 if st.button("🚀 開始分析", type="primary"):
-    if not raw_text:
+    if "AIza" not in USER_API_KEY:
+        st.error("❌ 請先在程式碼第 10 行貼上您的 API Key！")
+    elif not raw_text:
         st.warning("請先貼上資料！")
     else:
-        with st.spinner("🤖 AI 正在閱讀您的文獻並歸納重點..."):
+        with st.spinner("🤖 AI (Gemini Pro) 正在閱讀您的文獻..."):
             # A. 切割資料
             lit_data = parse_text(raw_text)
             
@@ -75,13 +78,13 @@ if st.button("🚀 開始分析", type="primary"):
                 ai_result = get_ai_analysis(raw_text)
                 
                 if "Error" in ai_result:
-                    st.error(f"連線錯誤：{ai_result} (可能是額度已滿或 Key 被停用)")
+                    st.error(f"連線錯誤：{ai_result}")
+                    st.info("💡 提示：請檢查您的 API Key 是否正確複製，且沒有多餘空白。")
                 else:
                     st.success("✅ AI 分析完成！")
                     
                     # C. 整理關鍵字
                     keywords = [k.strip() for k in ai_result.replace("\n", "、").split("、") if k.strip()]
-                    # 去除重複
                     keywords = list(dict.fromkeys(keywords))
                     
                     # D. 讓使用者篩選
