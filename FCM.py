@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import requests # 使用直連模式
+import requests
 import json
 import string
 from io import BytesIO
@@ -12,39 +12,67 @@ except ImportError:
     pass 
 
 # --- 1. 設定您的 API Key ---
-# ⚠️ 這是您提供的金鑰 (建議測試完後去 Google 後台更換新鑰匙以策安全)
 USER_API_KEY = "AIzaSyBlj24gBVr3RJhkukS9p6yo5s2-WVBH2H0" 
 
 # --- 2. 頁面設定 ---
-st.set_page_config(page_title="AI 文獻分析器 (Gemini Pro)", layout="wide", page_icon="⚡")
-st.title("⚡ AI 文獻分析器 (Gemini Pro 直連版)")
-st.markdown("### 使用標準版 Gemini Pro 模型，保證相容性")
+st.set_page_config(page_title="AI 文獻分析器 (自動偵測版)", layout="wide", page_icon="🛡️")
+st.title("🛡️ AI 文獻分析器 (自動偵測模型版)")
+st.markdown("### 系統將自動尋找您的金鑰可用的模型，解決 404 問題")
 
-# --- 3. 測試連線按鈕 ---
-if st.button("📡 測試 API 連線"):
-    with st.spinner("正在直連 Google 主機 (Gemini Pro)..."):
-        try:
-            # 改用 gemini-pro，這是最穩定的版本
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={USER_API_KEY}"
+# --- 3. 核心：自動偵測可用模型 ---
+def find_working_model(api_key):
+    # 問 Google: 我能用什麼模型？
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            data = response.json()
+            # 找一個支援 'generateContent' 的模型
+            for model in data.get('models', []):
+                if 'generateContent' in model.get('supportedGenerationMethods', []):
+                    # 優先找 gemini 系列
+                    if 'gemini' in model['name']:
+                        return model['name'] # 找到就回傳，例如 'models/gemini-1.5-flash'
+            return None
+        else:
+            return None
+    except:
+        return None
+
+# --- 4. 測試連線按鈕 ---
+if st.button("📡 測試連線與自動偵測"):
+    with st.spinner("正在詢問 Google 您可用的模型列表..."):
+        valid_model = find_working_model(USER_API_KEY)
+        
+        if valid_model:
+            st.success(f"✅ 連線成功！系統自動為您選用了模型：`{valid_model}`")
+            # 測試一下
+            url = f"https://generativelanguage.googleapis.com/v1beta/{valid_model}:generateContent?key={USER_API_KEY}"
             headers = {'Content-Type': 'application/json'}
             data = {"contents": [{"parts": [{"text": "Hello"}]}]}
-            
-            response = requests.post(url, headers=headers, json=data)
-            
-            if response.status_code == 200:
-                st.success(f"✅ 連線成功！Google 回應：{response.json()['candidates'][0]['content']['parts'][0]['text']}")
-            else:
-                st.error(f"❌ 連線失敗 (代碼 {response.status_code}): {response.text}")
-        except Exception as e:
-            st.error(f"❌ 網路錯誤：{str(e)}")
+            try:
+                test_resp = requests.post(url, headers=headers, json=data)
+                if test_resp.status_code == 200:
+                    st.info(f"回應測試：{test_resp.json()['candidates'][0]['content']['parts'][0]['text']}")
+                else:
+                    st.error(f"雖然找到了模型，但測試失敗：{test_resp.text}")
+            except Exception as e:
+                st.error(f"測試請求錯誤：{e}")
+        else:
+            st.error("❌ 無法找到任何可用模型！可能是您的 API Key 沒有權限，或該專案未啟用 Generative AI API。")
 
-# --- 4. 文獻輸入與處理 ---
+# --- 5. 文獻輸入與處理 ---
 st.info("👇 請貼上文獻資料 (每篇請換行)")
 raw_text = st.text_area("文獻輸入區", height=200)
 
-def get_ai_analysis_via_api(text, key):
-    # 這裡也改成 gemini-pro
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={key}"
+def get_ai_analysis_auto(text, key):
+    # 1. 先找模型
+    model_name = find_working_model(key)
+    if not model_name:
+        return "Error: 無法偵測到任何可用模型，請檢查 API Key 權限。"
+    
+    # 2. 用找到的模型去跑
+    url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={key}"
     headers = {'Content-Type': 'application/json'}
     
     prompt = f"""
@@ -65,7 +93,7 @@ def get_ai_analysis_via_api(text, key):
             result = response.json()
             return result['candidates'][0]['content']['parts'][0]['text']
         else:
-            return f"Error: {response.text}"
+            return f"Error (Code {response.status_code}): {response.text}"
     except Exception as e:
         return f"Error: {str(e)}"
 
@@ -74,17 +102,18 @@ def parse_text(text):
     lines = text.strip().split('\n')
     return [{"title": line[:15], "content": line} for line in lines if len(line) > 5]
 
-# --- 5. 執行分析 ---
+# --- 6. 執行分析 ---
 if st.button("🚀 開始分析", type="primary"):
     if not raw_text:
         st.warning("請先貼上資料！")
     else:
-        with st.spinner("🤖 AI (Gemini Pro) 分析中..."):
+        with st.spinner("🤖 AI 正在自動偵測模型並分析中..."):
             lit_data = parse_text(raw_text)
-            ai_result = get_ai_analysis_via_api(raw_text, USER_API_KEY)
+            ai_result = get_ai_analysis_auto(raw_text, USER_API_KEY)
             
             if "Error" in ai_result:
                 st.error(f"分析失敗：{ai_result}")
+                st.warning("如果一直失敗，建議去 Google AI Studio 重新申請一把新的 Key，舊的可能權限壞了。")
             else:
                 st.success("✅ 分析完成！")
                 
