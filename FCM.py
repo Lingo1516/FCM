@@ -5,149 +5,104 @@ import string
 from io import BytesIO
 
 # --- 1. 設定您的 API Key ---
-# ⚠️ 請在下方引號內貼上你的 AIza 開頭金鑰
-USER_API_KEY = "這裡貼上你的AIza開頭金鑰" 
+# ⚠️ 請把你的新鑰匙貼在下面這個引號裡面 (不要留空白！)
+USER_API_KEY = "AIzaSyBlj24gBVr3RJhkukS9p6yo5s2-WVBH2H0" 
 
 # 設定 Google Gemini
-if USER_API_KEY:
+if USER_API_KEY and "AIza" in USER_API_KEY:
     genai.configure(api_key=USER_API_KEY)
 
 # --- 2. 頁面設定 ---
-st.set_page_config(page_title="AI 文獻分析器 (穩定版)", layout="wide", page_icon="🤖")
+st.set_page_config(page_title="AI 文獻分析器 (連線測試版)", layout="wide", page_icon="⚡")
+st.title("⚡ AI 文獻分析器 (含連線檢測)")
 
-st.title("🤖 AI 智慧文獻分析器 (Gemini Pro)")
-st.markdown("### 已切換至穩定版模型，請貼上文獻")
+# --- 3. 測試連線區 (新增功能) ---
+st.info("👇 如果擔心卡住，請先點擊下方的「測試連線」按鈕")
+if st.button("📡 測試 AI 連線 (Ping)"):
+    if "AIza" not in USER_API_KEY:
+        st.error("❌ 程式碼第 9 行還沒有貼上正確的金鑰喔！")
+    else:
+        with st.spinner("正在嘗試呼叫 Google..."):
+            try:
+                # 測試用最簡單的指令
+                model = genai.GenerativeModel('gemini-pro')
+                response = model.generate_content("Hello, reply 'OK' if you see this.")
+                st.success(f"✅ 連線成功！Google 回應：{response.text}")
+                st.balloons() # 放氣球慶祝
+            except Exception as e:
+                st.error(f"❌ 連線失敗！原因：{e}")
+                st.warning("請檢查：1. 金鑰是否正確？ 2. 舊金鑰是否已刪除？")
 
-# --- 3. 輸入區 ---
-st.info("👇 請將文獻資料貼在下方 (每一篇請記得 **按 Enter 換行**)")
-raw_text = st.text_area("文獻輸入區", height=300, placeholder="直接把亂亂的文字貼進來...\n記得每一篇要換行...\n程式會自動幫你抓重點...")
+st.divider()
 
-# --- 4. 核心邏輯：呼叫 Google AI ---
+# --- 4. 原本文獻輸入區 ---
+st.markdown("### 文獻分析區")
+raw_text = st.text_area("文獻輸入區", height=200, placeholder="貼上文獻內容...\n記得換行...")
+
+# --- 5. 分析核心邏輯 ---
 def get_ai_analysis(text):
-    # 修正重點：改用支援度最廣的 'gemini-pro'，避免 404 錯誤
     model = genai.GenerativeModel('gemini-pro')
-    
+    # 增加 timeout 設定 (避免無限轉圈)
+    # 雖然 python library 不一定完全支援 timeout 參數，但我們透過 prompt 簡化來加速
     prompt = f"""
-    你是一位學術研究專家。請閱讀以下文獻內容，幫我歸納出 10 到 15 個最重要的「研究構面」或「評估準則」。
-    
-    【嚴格規則】：
-    1. 排除所有無關詞彙（如：日期、下午、報告、作者名、研究方法）。
-    2. 只保留具備學術價值的名詞（例如：績效管理、數位轉型、供應鏈韌性、ESG、獲利能力）。
-    3. 直接輸出名詞，用「、」頓號隔開。不要有任何開場白或結尾。
-    
-    【文獻內容】：
-    {text[:8000]} 
+    任務：歸納 10 個學術研究構面關鍵字。
+    規則：只列出名詞，用頓號隔開。排除無關詞彙。
+    內容：{text[:5000]}
     """
-    
     try:
         response = model.generate_content(prompt)
         return response.text
     except Exception as e:
         return f"Error: {str(e)}"
 
-# --- 5. 輔助邏輯：切割文獻 ---
+# 輔助：切割
 def parse_text(text):
     lines = text.strip().split('\n')
-    literature_list = []
-    
-    for line in lines:
-        line = line.strip()
-        if len(line) < 5: continue
-        
-        # 自動取前 15 字當標題
-        title = line[:15] + "..." if len(line) > 15 else line
-        literature_list.append({"title": title, "content": line})
-        
-    return literature_list
+    return [{"title": line[:15], "content": line} for line in lines if len(line) > 5]
 
 # --- 6. 執行按鈕 ---
-if st.button("🚀 開始分析", type="primary"):
-    if "AIza" not in USER_API_KEY:
-        st.error("❌ 請先在程式碼第 10 行貼上您的 API Key！")
-    elif not raw_text:
+if st.button("🚀 開始正式分析", type="primary"):
+    if not raw_text:
         st.warning("請先貼上資料！")
     else:
-        with st.spinner("🤖 AI (Gemini Pro) 正在閱讀您的文獻..."):
-            # A. 切割資料
+        # 顯示進度條，讓你心安
+        progress_text = "AI 正在閱讀中，請稍候... (約需 5-10 秒)"
+        my_bar = st.progress(0, text=progress_text)
+        
+        try:
+            # 模擬進度 (因為 API 是同步的，無法精準顯示 %，只能給個感覺)
+            my_bar.progress(30, text="正在傳送資料給 Google...")
+            
+            # A. 切割
             lit_data = parse_text(raw_text)
             
-            if not lit_data:
-                st.error("無法切割資料，請確認每篇文獻有換行。")
+            # B. 呼叫
+            ai_result = get_ai_analysis(raw_text)
+            my_bar.progress(80, text="正在整理數據...")
+            
+            if "Error" in ai_result:
+                st.error(f"發生錯誤：{ai_result}")
             else:
-                # B. 呼叫 AI
-                ai_result = get_ai_analysis(raw_text)
+                st.success("✅ 分析完成！")
+                my_bar.progress(100, text="完成！")
                 
-                if "Error" in ai_result:
-                    st.error(f"連線錯誤：{ai_result}")
-                    st.info("💡 提示：請檢查您的 API Key 是否正確複製，且沒有多餘空白。")
-                else:
-                    st.success("✅ AI 分析完成！")
+                # C. 後續處理 (簡化版顯示)
+                keywords = [k.strip() for k in ai_result.replace("\n", "、").split("、") if k.strip()]
+                final_keywords = st.multiselect("AI 抓到的準則", options=keywords, default=keywords)
+                
+                if final_keywords:
+                    # 建表
+                    matrix = {}
+                    labels = []
+                    titles = []
+                    for i, item in enumerate(lit_data):
+                        lbl = string.ascii_uppercase[i % 26]
+                        labels.append(lbl)
+                        titles.append(item['title'])
+                        matrix[lbl] = ["○" if k in item['content'] else "" for k in final_keywords]
                     
-                    # C. 整理關鍵字
-                    keywords = [k.strip() for k in ai_result.replace("\n", "、").split("、") if k.strip()]
-                    keywords = list(dict.fromkeys(keywords))
+                    df = pd.DataFrame(matrix, index=final_keywords)
+                    st.dataframe(df)
                     
-                    # D. 讓使用者篩選
-                    st.subheader("1️⃣ AI 建議的準則 (可刪減)")
-                    final_keywords = st.multiselect(
-                        "請勾選要保留的準則：",
-                        options=keywords,
-                        default=keywords
-                    )
-                    
-                    # 手動補充
-                    manual_add = st.text_input("手動補充準則 (用空白隔開)：", placeholder="例如：創新能力 組織文化")
-                    if manual_add:
-                        final_keywords = manual_add.split() + final_keywords
-
-                    if final_keywords:
-                        # E. 建立矩陣
-                        matrix = {}
-                        labels = []
-                        titles = []
-                        
-                        def get_label(idx):
-                            if idx < 26: return string.ascii_uppercase[idx]
-                            else: return f"{string.ascii_uppercase[idx // 26 - 1]}{string.ascii_uppercase[idx % 26]}"
-
-                        for i, item in enumerate(lit_data):
-                            label = get_label(i)
-                            labels.append(label)
-                            titles.append(item['title'])
-                            
-                            col_res = []
-                            for kw in final_keywords:
-                                if kw in item['content']:
-                                    col_res.append("○")
-                                else:
-                                    col_res.append("")
-                            matrix[label] = col_res
-                        
-                        # F. 顯示結果
-                        df_matrix = pd.DataFrame(matrix, index=final_keywords)
-                        df_legend = pd.DataFrame({"代號": labels, "對應文獻": titles})
-                        
-                        st.divider()
-                        c1, c2 = st.columns([2, 1])
-                        with c1:
-                            st.subheader("📊 分析矩陣")
-                            st.dataframe(df_matrix, use_container_width=True)
-                        with c2:
-                            st.subheader("📝 對照表")
-                            st.dataframe(df_legend, hide_index=True, use_container_width=True)
-                        
-                        # G. 下載
-                        output = BytesIO()
-                        try:
-                            import xlsxwriter
-                            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                                df_matrix.to_excel(writer, sheet_name='矩陣')
-                                df_legend.to_excel(writer, sheet_name='對照表')
-                            file_name = "ai_analysis.xlsx"
-                            mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                        except ImportError:
-                            df_matrix.to_csv(output, encoding='utf-8-sig')
-                            file_name = "ai_analysis.csv"
-                            mime = "text/csv"
-                            
-                        st.download_button(f"📥 下載報表 ({file_name})", output.getvalue(), file_name, mime, type="primary")
+        except Exception as e:
+            st.error(f"系統錯誤：{e}")
