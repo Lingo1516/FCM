@@ -6,86 +6,77 @@ import string
 from io import BytesIO
 
 # --- 1. 基礎設定 ---
-st.set_page_config(page_title="MCDM 兩階段收斂分析器", layout="wide", page_icon="🧬")
+st.set_page_config(page_title="MCDM 雙階段篩選分析器", layout="wide", page_icon="🧬")
 
-# --- 2. 側邊欄：參數設定 ---
+# --- 2. 側邊欄 ---
 with st.sidebar:
-    st.header("🧬 兩階段收斂設定")
-    st.info("此系統將執行：發散 (找出大量細項) -> 收斂 (歸納核心準則) 的邏輯運算。")
+    st.header("🧬 雙表輸出設定")
+    st.info("此版本將嚴格區分為「第一階段：原始列表」與「第二階段：收斂歸納」。")
     
     api_key = st.text_input("Google API Key", type="password")
     
     st.divider()
     
-    # 研究題目
-    thesis_topic = st.text_input("您的論文題目：", value="餐飲業導入 AI 服務之評估準則")
+    thesis_topic = st.text_input("論文題目：", value="餐飲業導入 AI 服務之評估準則")
     
-    # 兩階段參數
+    # 設定兩階段數量
     c1, c2 = st.columns(2)
     with c1:
-        pool_size = st.number_input("第一步：廣泛列出", value=50, help="希望 AI 先從文獻抓出多少個細項")
+        pool_size = st.number_input("Step 1 原始數量", value=50)
     with c2:
-        target_size = st.number_input("第二步：收斂成", value=15, help="最後希望歸納成幾個主要準則")
+        target_size = st.number_input("Step 2 收斂數量", value=15)
 
-# --- 3. 自動尋找可用模型 ---
+# --- 3. 模型選擇 ---
 def get_best_model(key):
-    # 優先嘗試 Pro 模型，因為收斂邏輯需要較強的推理能力
     url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
     try:
         response = requests.get(url)
         if response.status_code == 200:
             models = response.json().get('models', [])
-            # 優先順序: 1.5-Pro -> 1.5-Flash
-            for m in models:
+            for m in models: # 優先用 Pro 處理複雜邏輯
                 if 'gemini-1.5-pro' in m['name']: return m['name']
             for m in models:
-                if 'gemini-1.5-flash' in m['name']: return m['name']
-            for m in models:
                 if 'gemini' in m['name']: return m['name']
-        return "models/gemini-1.5-pro"
+        return "models/gemini-1.5-flash"
     except:
         return "models/gemini-1.5-flash"
 
-# --- 4. 核心分析邏輯 (雙階段收斂 Prompt) ---
-def run_convergence_analysis(text, key, model_name, topic, pool_n, target_n):
+# --- 4. 核心分析邏輯 (雙表專用 Prompt) ---
+def run_two_stage_analysis(text, key, model_name, topic, pool_n, target_n):
     url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={key}"
     headers = {'Content-Type': 'application/json'}
     
-    # 這個 Prompt 是整個程式的靈魂
     prompt = f"""
-    你是一個 MCDM 研究方法的專家。
-    【研究題目】：{topic}
-    【任務目標】：請執行「兩階段準則篩選法」。
-    
-    【階段一：發散 (Brainstorming)】
-    請先閱讀文獻，從中盡可能找出約 {pool_n} 個與題目相關的「原始細項準則 (Raw Criteria)」。
+    你是一個 MCDM 研究專家。使用者題目：{topic}。
+    請執行嚴格的「兩階段準則篩選」，並回傳 JSON 資料。
 
-    【階段二：收斂 (Convergence)】
-    請運用你的邏輯，將上述細項準則進行合併、分類，歸納出最具代表性的 {target_n} 個「最終準則 (Final Criteria)」。
-    
-    【輸出要求】：
-    1. 建立矩陣：標示每一篇文獻是否提到了該「最終準則」。
-    2. 解釋邏輯：必須詳細說明每個「最終準則」是由哪些「原始細項」合併而來，以及合併的理由。
-    
-    請直接回傳純 JSON 格式 (不要 Markdown)，結構嚴格如下：
+    【任務 1：建立準則池 (Pooling)】
+    從文獻中找出約 {pool_n} 個「原始細項準則 (Raw Criteria)」。
+    這些是未經修飾的、散落在各文獻中的具體指標。
+
+    【任務 2：準則收斂 (Convergence)】
+    將上述原始準則進行邏輯分類與合併，歸納出 {target_n} 個「最終構面/準則 (Final Criteria)」。
+    必須清楚說明每個最終準則包含了哪些原始準則，以及合併理由。
+
+    【輸出格式 (JSON)】：
     {{
-      "final_dimensions": [
+      "step1_raw_pool": [
+        {{ "id": 1, "name": "原始準則A" }},
+        {{ "id": 2, "name": "原始準則B" }},
+        ... (約 {pool_n} 個)
+      ],
+      "step2_convergence": [
         {{
           "id": 1,
-          "name": "最終準則名稱 (例如：營運成本)",
-          "composition_logic": "本準則合併了：原始細項A、原始細項B。原因：它們都屬於成本結構...",
-          "matched_papers_indices": [0, 2] // 代表第1篇和第3篇文獻有提到此準則
+          "final_name": "最終準則名稱 (例如：營運成本)",
+          "source_raw_items": ["原始準則A", "原始準則B"],
+          "reasoning": "A與B皆涉及資金支出，故合併為成本構面..."
         }},
-        ... (共 {target_n} 個)
-      ],
-      "papers": [
-        "文獻1的APA格式 citation...",
-        "文獻2的APA格式 citation...",
-        ...
+        ... (約 {target_n} 個)
       ]
     }}
-
-    【原始文獻資料】：
+    
+    【原始文獻】：
     {text[:14000]}
     """
     
@@ -103,88 +94,69 @@ def run_convergence_analysis(text, key, model_name, topic, pool_n, target_n):
         return "ERROR", str(e)
 
 # --- 5. 主畫面 ---
-st.title("🧬 MCDM 準則：發散與收斂工作區")
+st.title("🧬 MCDM 準則：雙階段報告生成")
 
-raw_text = st.text_area("請在此貼上文獻摘要 (AI 會先抓大池子，再收斂成精華)：", height=300)
+raw_text = st.text_area("請在此貼上文獻摘要：", height=250)
 
-if st.button("🚀 執行收斂運算", type="primary"):
+if st.button("🚀 執行雙階段分析", type="primary"):
     if not api_key:
-        st.error("❌ 請先貼上 API Key！")
+        st.error("❌ 請輸入 Key")
     elif not raw_text:
-        st.warning("⚠️ 請輸入文獻資料！")
+        st.warning("⚠️ 請輸入文獻")
     else:
-        status_box = st.empty()
-        status_box.info(f"🔍 AI 正在思考：先找出 {pool_size} 個細項，再邏輯歸納為 {target_size} 個主準則...")
-        
-        valid_model = get_best_model(api_key)
-        
-        # 執行分析
-        status, result_data = run_convergence_analysis(raw_text, api_key, valid_model, thesis_topic, pool_size, target_size)
-        
-        if status == "OK":
-            status_box.success("✅ 收斂完成！邏輯矩陣已生成。")
+        with st.spinner(f"🔍 AI 正在進行兩階段運算：先列出 {pool_size} 個，再收斂為 {target_size} 個..."):
+            valid_model = get_best_model(api_key)
+            status, result = run_two_stage_analysis(raw_text, api_key, valid_model, thesis_topic, pool_size, target_size)
             
-            try:
-                # 解析資料
-                dimensions = result_data.get("final_dimensions", [])
-                papers_list = result_data.get("papers", [])
+            if status == "OK":
+                st.success("✅ 分析完成！請查看下方兩個分頁。")
                 
-                # 準備 DataFrame 的資料容器
-                # 欄位順序：序號 | 最終準則 | [文獻A] | [文獻B]... | 收斂邏輯說明 (最右邊)
+                # 建立兩個分頁
+                tab1, tab2 = st.tabs(["📑 表一：原始準則池 (50項)", "🎯 表二：收斂歸納表 (15項)"])
                 
-                rows = []
-                paper_labels = [string.ascii_uppercase[i % 26] for i in range(len(papers_list))]
-                
-                for dim in dimensions:
-                    row_data = {}
-                    # 1. 序號
-                    row_data["序號"] = dim.get("id")
-                    # 2. 準則名稱
-                    row_data["最終評估準則"] = dim.get("name")
-                    
-                    # 3. 文獻矩陣 (中間)
-                    matched_indices = dim.get("matched_papers_indices", [])
-                    for idx, label in enumerate(paper_labels):
-                        row_data[label] = "●" if idx in matched_indices else ""
-                    
-                    # 4. 收斂邏輯 (最右邊 - 這是你特別要求的)
-                    row_data["收斂邏輯與原始細項來源"] = dim.get("composition_logic")
-                    
-                    rows.append(row_data)
-                
-                # 建立主表
-                df_main = pd.DataFrame(rows)
-                
-                # 建立文獻對照表
-                df_papers = pd.DataFrame({
-                    "代號": paper_labels,
-                    "文獻來源 (APA)": papers_list
-                })
-                
-                st.divider()
-                
-                # 顯示區域
-                st.subheader("📊 收斂結果矩陣")
-                st.markdown("請向右滑動表格查看最右側的**「收斂邏輯」**欄位 👉")
-                st.dataframe(df_main, hide_index=True, use_container_width=True)
-                
-                st.subheader("📝 文獻來源對照")
-                st.dataframe(df_papers, hide_index=True, use_container_width=True)
-                
-                # 下載功能
-                output = BytesIO()
-                try:
-                    import xlsxwriter
-                    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                        df_main.to_excel(writer, sheet_name='收斂矩陣', index=False)
-                        df_papers.to_excel(writer, sheet_name='文獻來源', index=False)
-                    st.download_button("📥 下載完整 Excel (含邏輯說明)", output.getvalue(), "mcdm_convergence.xlsx", type="primary")
-                except:
-                    st.download_button("📥 下載 CSV", df_main.to_csv().encode('utf-8-sig'), "mcdm_convergence.csv")
+                # --- Tab 1: 原始列表 ---
+                with tab1:
+                    raw_data = result.get("step1_raw_pool", [])
+                    if raw_data:
+                        df_raw = pd.DataFrame(raw_data)
+                        df_raw.rename(columns={"id": "序號", "name": "原始細項準則名稱"}, inplace=True)
+                        st.subheader(f"Step 1: 初始篩選準則 (共 {len(raw_data)} 項)")
+                        st.dataframe(df_raw, hide_index=True, use_container_width=True)
+                    else:
+                        st.warning("AI 未能產生原始列表")
 
-            except Exception as e:
-                st.error(f"資料解析發生錯誤：{e}")
-                st.json(result_data)
-        else:
-            status_box.error("分析失敗")
-            st.code(result_data)
+                # --- Tab 2: 收斂結果 ---
+                with tab2:
+                    conv_data = result.get("step2_convergence", [])
+                    if conv_data:
+                        rows = []
+                        for item in conv_data:
+                            # 整理資料格式
+                            row = {
+                                "序號": item.get("id"),
+                                "最終準則名稱": item.get("final_name"),
+                                "涵蓋之原始細項 (來自表一)": ", ".join(item.get("source_raw_items", [])),
+                                "收斂/合併理由說明": item.get("reasoning") # 這是最重要的欄位
+                            }
+                            rows.append(row)
+                        
+                        df_conv = pd.DataFrame(rows)
+                        st.subheader(f"Step 2: 最終收斂準則 (共 {len(conv_data)} 項)")
+                        st.markdown("👉 **最右側欄位** 為詳細的歸納邏輯說明")
+                        st.dataframe(df_conv, hide_index=True, use_container_width=True)
+                        
+                        # --- 下載區 ---
+                        st.divider()
+                        output = BytesIO()
+                        try:
+                            import xlsxwriter
+                            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+                                if raw_data: df_raw.to_excel(writer, sheet_name='Step1_原始準則(50)', index=False)
+                                if conv_data: df_conv.to_excel(writer, sheet_name='Step2_收斂準則(15)', index=False)
+                            st.download_button("📥 下載完整雙表 Excel", output.getvalue(), "mcdm_two_stage.xlsx", type="primary")
+                        except:
+                            st.error("Excel 模組錯誤")
+
+            else:
+                st.error("分析失敗")
+                st.code(result)
