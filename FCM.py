@@ -7,22 +7,25 @@ import re
 from io import BytesIO
 
 # --- 1. 基礎設定 ---
-st.set_page_config(page_title="MCDM 全功能分析 (含出處註記)", layout="wide", page_icon="💎")
+st.set_page_config(page_title="MCDM 層級架構分析 (構面->準則)", layout="wide", page_icon="🏗️")
 
 # --- 2. 側邊欄 ---
 with st.sidebar:
-    st.header("💎 全功能設定")
-    st.info("此版本已在「原始表」與「收斂表」的最右側增加【作者代號】欄位。")
+    st.header("🏗️ 層級架構設定")
+    st.info("AI 將執行：文獻 -> 原始細項 -> 收斂準則 -> 歸納構面 的完整流程。")
     
     api_key = st.text_input("Google API Key", type="password")
     st.divider()
     thesis_topic = st.text_input("論文題目：", value="餐飲業導入 AI 服務之評估準則")
     
-    c1, c2 = st.columns(2)
+    st.subheader("層級數量設定")
+    c1, c2, c3 = st.columns(3)
     with c1:
-        pool_size = st.number_input("原始發散數量", value=50)
+        pool_size = st.number_input("1.原始池", value=50, help="Step 1 找出的數量")
     with c2:
-        target_size = st.number_input("最終收斂數量", value=15)
+        criteria_size = st.number_input("2.準則數", value=15, help="Step 2 收斂出的準則數量")
+    with c3:
+        dim_size = st.number_input("3.構面數", value=4, help="Step 3 歸納出的構面數量")
 
 # --- 3. 自動適配模型 ---
 def get_best_model(key):
@@ -31,7 +34,6 @@ def get_best_model(key):
         response = requests.get(url)
         if response.status_code == 200:
             models = response.json().get('models', [])
-            # 優先權：Pro (邏輯好) > Flash (速度快)
             for m in models:
                 if 'gemini-1.5-pro' in m['name']: return m['name']
             for m in models:
@@ -44,44 +46,46 @@ def get_best_model(key):
     except:
         return None
 
-# --- 4. 核心分析邏輯 (更新 Prompt 以索取 Step 1 的出處) ---
-def run_all_in_one_analysis(text, key, model_name, topic, pool_n, target_n):
+# --- 4. 核心分析邏輯 (包含構面歸納) ---
+def run_hierarchy_analysis(text, key, model_name, topic, pool_n, crit_n, dim_n):
     url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={key}"
     headers = {'Content-Type': 'application/json'}
     
     prompt = f"""
     你是一個 MCDM 研究專家。題目：{topic}。
-    請執行完整的「發散 -> 收斂 -> 矩陣」流程。
+    請建立一個完整的「構面 (Dimensions) -> 準則 (Criteria)」層級架構。
 
-    【任務要求】：
-    1. 辨識文獻並編號 (ID 0, 1, 2...)，轉為 APA 格式。
-    2. Step 1 (Pooling): 從文中找出約 {pool_n} 個「原始細項準則」。
-       **重要：** 針對每一個原始細項，請標註是哪幾篇文獻提到的 (Paper IDs)。
-    3. Step 2 (Convergence): 將其歸納為 {target_n} 個「最終準則」。
-       - 說明每個最終準則是由哪些原始項目合併的。
-       - 說明合併/收斂的理由 (Reasoning)。
-       - 標註每個最終準則出現在哪幾篇論文中 (Paper IDs)。
+    【任務流程】：
+    1. **文獻處理**：辨識文獻並編號 (ID 0, 1...)，轉為 APA。
+    2. **發散 (Pooling)**：從文獻找出約 {pool_n} 個「原始細項」。
+    3. **收斂 (Convergence)**：將其歸納為 {crit_n} 個「評估準則 (Criteria)」。
+    4. **歸納構面 (Grouping)**：請將這 {crit_n} 個準則，依照性質歸納分類到 {dim_n} 個「評估構面 (Dimensions)」底下。
+       (例如：成本、技術、效益、風險...等構面)。
 
-    【回傳 JSON 格式 (嚴格遵守)】：
+    【輸出 JSON 格式 (嚴格遵守)】：
     {{
       "papers": [
-        {{ "id": 0, "apa": "作者A (2024). 標題..." }},
-        {{ "id": 1, "apa": "作者B (2023). 標題..." }}
+        {{ "id": 0, "apa": "作者A..." }},
+        ...
       ],
       "step1_raw_pool": [
-        {{ "name": "原始細項1", "matched_ids": [0, 1] }},
-        {{ "name": "原始細項2", "matched_ids": [2] }},
-        ... (約 {pool_n} 個)
+        {{ "name": "原始細項1", "matched_ids": [0] }},
+        ...
       ],
-      "step2_convergence": [
+      "final_hierarchy": [
         {{
-          "id": 1,
-          "final_name": "最終準則名稱",
-          "source_raw_items": ["細項1", "細項5"],
-          "reasoning": "因為皆涉及財務支出...",
-          "matched_paper_ids": [0, 2] 
+          "dimension_name": "構面名稱 (例如：財務構面)",
+          "contained_criteria": [
+             {{
+               "criteria_name": "準則名稱 (例如：建置成本)",
+               "source_raw_items": ["原始細項A", "原始細項B"],
+               "reasoning": "合併理由...",
+               "matched_paper_ids": [0, 2]
+             }},
+             ... (該構面底下的準則)
+          ]
         }},
-        ... (共 {target_n} 個)
+        ... (共 {dim_n} 個構面，所有準則加總需約 {crit_n} 個)
       ]
     }}
     
@@ -109,33 +113,33 @@ def run_all_in_one_analysis(text, key, model_name, topic, pool_n, target_n):
         return "ERROR", str(e)
 
 # --- 5. 主畫面 ---
-st.title("💎 MCDM 完整研究報告 (含出處註記)")
+st.title("🏗️ MCDM 層級架構分析工作區")
 
 raw_text = st.text_area("請貼上文獻摘要：", height=250)
 
-if st.button("🚀 執行全功能分析", type="primary"):
+if st.button("🚀 執行層級分析 (構面->準則)", type="primary"):
     if not api_key:
         st.error("❌ 請輸入 Key")
     elif not raw_text:
         st.warning("⚠️ 請輸入文獻")
     else:
-        with st.spinner("🔍 AI 正在處理：發散(含出處) -> 收斂(含出處) -> 矩陣建構..."):
+        with st.spinner(f"🔍 AI 正在運算：將 {criteria_size} 個準則歸納為 {dim_size} 個構面..."):
             valid_model = get_best_model(api_key)
             
             if not valid_model:
                 st.error("❌ 找不到可用模型")
             else:
-                status, result = run_all_in_one_analysis(raw_text, api_key, valid_model, thesis_topic, pool_size, target_size)
+                status, result = run_hierarchy_analysis(raw_text, api_key, valid_model, thesis_topic, pool_size, criteria_size, dim_size)
                 
                 if status == "OK":
-                    st.success("✅ 分析完成！")
+                    st.success("✅ 架構建立完成！")
                     
-                    # 準備資料
+                    # 資料解析
                     papers = result.get("papers", [])
                     raw_pool = result.get("step1_raw_pool", [])
-                    conv_data = result.get("step2_convergence", [])
+                    hierarchy = result.get("final_hierarchy", [])
                     
-                    # 建立代號對照 Map (id -> A, B, C...)
+                    # 建立代號對照 (ID -> A, B, C)
                     id_to_code = {}
                     legend_rows = []
                     for idx, p in enumerate(papers):
@@ -145,79 +149,74 @@ if st.button("🚀 執行全功能分析", type="primary"):
                     
                     df_legend = pd.DataFrame(legend_rows)
                     
-                    # --- 建立 4 個分頁 ---
+                    # --- 建立分頁 ---
                     t1, t2, t3, t4 = st.tabs([
-                        "1️⃣ Step 1: 原始列表 (50)", 
-                        "2️⃣ Step 2: 收斂邏輯 (15)", 
-                        "3️⃣ Step 3: 分析矩陣圖", 
-                        "4️⃣ 文獻代號對照"
+                        "1️⃣ Step 1: 原始池", 
+                        "2️⃣ Step 2 & 3: 層級架構表", 
+                        "3️⃣ Step 4: 矩陣圖", 
+                        "4️⃣ 文獻對照"
                     ])
                     
-                    # Tab 1: 原始池 (增加出處欄位)
+                    # Tab 1: 原始池
                     with t1:
                         if raw_pool:
                             raw_rows = []
                             for i, item in enumerate(raw_pool):
-                                # 判斷 item 是字串還是字典 (為了相容性)
-                                name = item["name"] if isinstance(item, dict) else str(item)
-                                ids = item.get("matched_ids", []) if isinstance(item, dict) else []
-                                codes = [id_to_code.get(pid, "?") for pid in ids]
-                                codes.sort()
-                                
+                                ids = item.get("matched_ids", [])
+                                codes = sorted([id_to_code.get(pid, "?") for pid in ids])
                                 raw_rows.append({
                                     "序號": i + 1,
-                                    "原始細項準則": name,
-                                    "出處代號": ", ".join(codes)  # 這裡就是你要的 A, B, C
+                                    "原始細項": item.get("name"),
+                                    "出處": ", ".join(codes)
                                 })
+                            st.dataframe(pd.DataFrame(raw_rows), hide_index=True, use_container_width=True)
                             
-                            df_raw = pd.DataFrame(raw_rows)
-                            st.dataframe(df_raw, hide_index=True, use_container_width=True)
-                        else:
-                            st.warning("無資料")
-                            
-                    # Tab 2: 收斂邏輯 (增加出處欄位)
+                    # Tab 2: 層級架構 (構面 -> 準則)
                     with t2:
-                        conv_rows = []
-                        for item in conv_data:
-                            # 找出對應的代號
-                            ids = item.get("matched_paper_ids", [])
-                            codes = [id_to_code.get(pid, "?") for pid in ids]
-                            codes.sort()
-                            
-                            conv_rows.append({
-                                "序號": item.get("id"),
-                                "最終準則": item.get("final_name"),
-                                "涵蓋之原始細項": ", ".join(item.get("source_raw_items", [])),
-                                "收斂/合併理由": item.get("reasoning"),
-                                "出處代號": ", ".join(codes) # 這裡就是你要的 A, C, D
-                            })
-                        df_conv = pd.DataFrame(conv_rows)
-                        st.dataframe(df_conv, hide_index=True, use_container_width=True)
+                        hier_rows = []
+                        criterion_counter = 1
                         
-                    # Tab 3: 矩陣圖 (保持不變，因為這是你要的黑點點)
+                        for dim in hierarchy:
+                            dim_name = dim.get("dimension_name")
+                            criteria_list = dim.get("contained_criteria", [])
+                            
+                            for crit in criteria_list:
+                                ids = crit.get("matched_paper_ids", [])
+                                codes = sorted([id_to_code.get(pid, "?") for pid in ids])
+                                
+                                hier_rows.append({
+                                    "層級一：構面 (Dimension)": dim_name,
+                                    "層級二：準則 (Criteria)": crit.get("criteria_name"),
+                                    "原始細項來源": ", ".join(crit.get("source_raw_items", [])),
+                                    "出處代號": ", ".join(codes),
+                                    "收斂理由": crit.get("reasoning")
+                                })
+                                criterion_counter += 1
+                        
+                        df_hier = pd.DataFrame(hier_rows)
+                        st.dataframe(df_hier, hide_index=True, use_container_width=True)
+
+                    # Tab 3: 矩陣圖 (左邊是準則，但在表格中可以加入構面欄位)
                     with t3:
                         matrix_rows = []
                         all_codes = [d["代號"] for d in legend_rows]
                         
-                        for item in conv_data:
-                            row = {"最終準則名稱": item.get("final_name")}
-                            matched = item.get("matched_paper_ids", [])
-                            
+                        for row_data in hier_rows: # 重用上面的資料
+                            m_row = {
+                                "構面": row_data["層級一：構面 (Dimension)"],
+                                "準則": row_data["層級二：準則 (Criteria)"]
+                            }
+                            # 填點
+                            source_codes = row_data["出處代號"].split(", ")
                             for code in all_codes:
-                                target_id = -1
-                                for pid, pcode in id_to_code.items():
-                                    if pcode == code: target_id = pid
-                                
-                                if target_id in matched:
-                                    row[code] = "●"
-                                else:
-                                    row[code] = ""
-                            matrix_rows.append(row)
-                        
+                                m_row[code] = "●" if code in source_codes else ""
+                            
+                            matrix_rows.append(m_row)
+                            
                         df_matrix = pd.DataFrame(matrix_rows)
                         st.dataframe(df_matrix, hide_index=True, use_container_width=True)
-                        
-                    # Tab 4: 文獻對照
+
+                    # Tab 4
                     with t4:
                         st.dataframe(df_legend, hide_index=True, use_container_width=True)
                         
@@ -227,14 +226,13 @@ if st.button("🚀 執行全功能分析", type="primary"):
                     try:
                         import xlsxwriter
                         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                            if raw_pool: df_raw.to_excel(writer, sheet_name='Step1_原始(50)', index=False)
-                            if conv_data: df_conv.to_excel(writer, sheet_name='Step2_收斂(15)', index=False)
-                            if conv_data: df_matrix.to_excel(writer, sheet_name='Step3_矩陣', index=False)
-                            df_legend.to_excel(writer, sheet_name='文獻對照表', index=False)
-                        st.download_button("📥 下載完整 Excel (含出處註記)", output.getvalue(), "mcdm_full_report.xlsx", type="primary")
+                            if raw_pool: pd.DataFrame(raw_rows).to_excel(writer, sheet_name='原始池', index=False)
+                            df_hier.to_excel(writer, sheet_name='層級架構表', index=False)
+                            df_matrix.to_excel(writer, sheet_name='矩陣圖', index=False)
+                            df_legend.to_excel(writer, sheet_name='文獻對照', index=False)
+                        st.download_button("📥 下載完整層級報告 Excel", output.getvalue(), "mcdm_hierarchy.xlsx", type="primary")
                     except:
-                        st.error("Excel 匯出模組錯誤")
-
+                        st.error("Excel 匯出失敗")
                 else:
                     st.error("分析失敗")
                     st.code(result)
