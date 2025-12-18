@@ -1,40 +1,54 @@
 import streamlit as st
 import requests
 
-st.set_page_config(page_title="金鑰最終驗證", page_icon="🔑")
+st.set_page_config(page_title="真相診斷器", page_icon="🕵️")
 
-st.title("🔑 Google API 金鑰最終驗證")
-st.info("請在此測試您從 Google AI Studio 申請的「新專案」金鑰。")
+st.title("🕵️ API Key 真相診斷")
+st.info("我們不猜了，直接問 Google 這把鑰匙能看到什麼。")
 
-# 讓使用者輸入 Key
-user_key = st.text_input("請貼上您的 API Key (AIza 開頭)：", type="password")
+# 1. 請貼上截圖中那把鑰匙
+default_key = st.text_input("請貼上結尾是 WY0iw 的那把鑰匙：", value="")
 
-if st.button("🚀 立即驗證", type="primary"):
-    if not user_key:
-        st.warning("請先貼上金鑰！")
+if st.button("🚀 執行診斷", type="primary"):
+    if len(default_key) < 10:
+        st.warning("請先貼上完整的鑰匙！")
     else:
-        with st.spinner("正在連線 Google 伺服器..."):
-            # 測試指令
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={user_key}"
-            headers = {'Content-Type': 'application/json'}
-            data = {"contents": [{"parts": [{"text": "Hello"}]}]}
+        # 2. 直接向 Google 請求「模型清單」 (ListModels)
+        # 這是最底層的查詢，如果這個都失敗，代表專案真的壞了
+        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={default_key}"
+        
+        try:
+            response = requests.get(url)
             
-            try:
-                response = requests.post(url, headers=headers, json=data)
+            if response.status_code == 200:
+                # --- 情況 A：成功 (代表鑰匙是好的) ---
+                data = response.json()
+                models = [m['name'] for m in data.get('models', [])]
                 
-                if response.status_code == 200:
-                    st.success("✅ 驗證成功！這把鑰匙是有效的！")
-                    st.json(response.json()) # 秀出 Google 回傳的證據
-                    st.balloons()
-                    st.markdown("### 🎉 恭喜！現在你可以把這把鑰匙拿去跑分析程式了！")
-                elif response.status_code == 404:
-                    st.error("❌ 驗證失敗 (404)")
-                    st.error("原因：這把鑰匙沒有權限。請確定您是在 **Google AI Studio** 按下 **Create in new project** 申請的。")
-                elif response.status_code == 429:
-                    st.error("❌ 驗證失敗 (429)")
-                    st.error("原因：額度已滿。請稍等幾分鐘或申請新專案。")
-                else:
-                    st.error(f"❌ 驗證失敗 (代碼 {response.status_code})")
-                    st.text(response.text)
-            except Exception as e:
-                st.error(f"連線錯誤：{e}")
+                st.success(f"✅ 診斷成功！您的鑰匙有效，可以看到 {len(models)} 個模型。")
+                st.write("Google 說您可以用這些模型：")
+                st.json(models)
+                
+                # 自動幫你寫好這把鑰匙的分析程式
+                st.divider()
+                st.subheader("🎉 既然鑰匙是好的，請用這個區塊開始分析：")
+                text_input = st.text_area("輸入文獻：")
+                if st.button("開始分析"):
+                    # 使用清單中的第一個 gemini 模型
+                    valid_model = next((m for m in models if 'gemini' in m), 'models/gemini-pro')
+                    gen_url = f"https://generativelanguage.googleapis.com/v1beta/{valid_model}:generateContent?key={default_key}"
+                    r = requests.post(gen_url, json={"contents": [{"parts": [{"text": f"抓重點:{text_input}"}]}]})
+                    st.write(r.json())
+                    
+            elif response.status_code == 404:
+                # --- 情況 B：404 (代表專案沒開通) ---
+                st.error("❌ 診斷結果：404 Not Found")
+                st.error(f"嚴重問題：您的鑰匙 `{default_key[-5:]}` 雖然存在，但所屬的專案 `770509881178` **沒有啟用 API 服務**。")
+                st.warning("這就是為什麼不管怎麼試都失敗的原因。這個專案壞了。")
+                
+            else:
+                st.error(f"❌ 其他錯誤：{response.status_code}")
+                st.text(response.text)
+                
+        except Exception as e:
+            st.error(f"連線錯誤：{e}")
