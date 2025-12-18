@@ -3,10 +3,11 @@ import pandas as pd
 import requests
 import string
 import re
+import time
 from collections import Counter
 from io import BytesIO
 
-# --- 嘗試匯入備用套件 (防呆) ---
+# --- 嘗試匯入備用套件 ---
 try:
     import xlsxwriter
     import jieba
@@ -18,91 +19,115 @@ except ImportError:
 USER_API_KEY = "AIzaSyBlj24gBVr3RJhkukS9p6yo5s2-WVBH2H0" 
 
 # --- 2. 頁面設定 ---
-st.set_page_config(page_title="AI 模型掃描與分析", layout="wide", page_icon="📡")
+st.set_page_config(page_title="AI 模型深度健檢", layout="wide", page_icon="🩺")
 
-# 初始化 Session State (用來記住掃描到的模型，才不會一直重跑)
-if 'available_models' not in st.session_state:
-    st.session_state.available_models = []
-if 'scan_done' not in st.session_state:
-    st.session_state.scan_done = False
+if 'working_models' not in st.session_state:
+    st.session_state.working_models = []
+if 'scan_performed' not in st.session_state:
+    st.session_state.scan_performed = False
 
 # ==========================================
-# 🛑 左側邊欄：模型掃描站
+# 🛑 左側邊欄：深度健檢站
 # ==========================================
 with st.sidebar:
-    st.header("📡 第一步：模型掃描")
-    st.info("請先點擊下方按鈕，搜尋目前可用的 Google AI 模型。")
+    st.header("🩺 第一步：模型健檢")
+    st.info("這個按鈕會實際測試每個模型，過濾掉「額度已滿」的壞模型。")
     
-    # 掃描函數
-    def scan_google_models(key):
-        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
+    # 測試函數
+    def check_model_health(key, model_name):
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
+        headers = {'Content-Type': 'application/json'}
+        # 傳送一個極短的字符來測試
+        data = {"contents": [{"parts": [{"text": "Hi"}]}]}
         try:
-            response = requests.get(url)
+            response = requests.post(url, headers=headers, json=data, timeout=5)
             if response.status_code == 200:
-                data = response.json()
-                # 篩選出支援 generateContent 的 gemini 模型
-                valid_list = []
-                for m in data.get('models', []):
-                    if 'generateContent' in m.get('supportedGenerationMethods', []) and 'gemini' in m['name']:
-                        # 只取名字，去掉 'models/' 前綴讓畫面好看點
-                        friendly_name = m['name'].replace("models/", "")
-                        valid_list.append(friendly_name)
-                return valid_list
+                return True # 活著
             else:
-                return []
+                return False # 死掉 (429 或其他)
         except:
-            return []
+            return False
 
-    # 掃描按鈕
-    if st.button("🔍 立即掃描可用模型", type="primary"):
-        with st.spinner("正在連線 Google 伺服器查詢名單..."):
-            found_models = scan_google_models(USER_API_KEY)
+    # 深度掃描按鈕
+    if st.button("🚀 執行深度掃描 (只留活口)", type="primary"):
+        st.session_state.working_models = [] # 清空舊紀錄
+        
+        # 我們只測試這幾個最常用且可能有額度的 (避免測試太多導致自己被鎖)
+        target_candidates = [
+            "gemini-1.5-flash",
+            "gemini-1.5-pro",
+            "gemini-2.0-flash",     # 新版
+            "gemini-2.0-flash-lite-preview-02-05", # 輕量版(通常比較空)
+            "gemini-1.0-pro"        # 舊版(備用)
+        ]
+        
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        found_any = False
+        
+        for i, model in enumerate(target_candidates):
+            status_text.text(f"正在測試：{model} ...")
             
-            if found_models:
-                st.session_state.available_models = found_models
-                st.session_state.scan_done = True
-                st.success(f"掃描完成！找到 {len(found_models)} 個模型。")
+            # 實際打一次 API
+            is_healthy = check_model_health(USER_API_KEY, model)
+            
+            if is_healthy:
+                st.session_state.working_models.append(model)
+                st.toast(f"✅ {model} 測試通過！")
+                found_any = True
             else:
-                st.error("❌ 掃描失敗：無法連線或金鑰無效。")
-                st.session_state.available_models = []
-    
+                # 失敗就不加入清單
+                print(f"{model} 測試失敗")
+            
+            # 更新進度條
+            progress_bar.progress((i + 1) / len(target_candidates))
+            time.sleep(0.5) # 稍微停頓一下，避免被判定攻擊
+            
+        st.session_state.scan_performed = True
+        status_text.text("掃描完成！")
+        
+        if not found_any:
+            st.error("❌ 所有 Google 模型都忙線中 (429)。建議使用本機模式。")
+
     st.divider()
     
-    # 顯示選擇選單 (只有掃描成功才會出現)
-    selected_model = None
-    if st.session_state.scan_done and st.session_state.available_models:
-        st.subheader("✅ 請選擇一個模型：")
-        selected_model = st.radio(
-            "建議選擇 Flash (快) 或 Pro (穩)：",
-            st.session_state.available_models,
-            index=0 # 預設選第一個
-        )
-        st.caption(f"目前已鎖定：`{selected_model}`")
-    elif st.session_state.scan_done and not st.session_state.available_models:
-        st.warning("⚠️ 無法使用 Google 模型，將自動切換至「本機演算法」。")
-        selected_model = "Local (本機備用)"
+    # 顯示「經過篩選」的選單
+    final_selection = None
+    
+    if st.session_state.scan_performed:
+        if st.session_state.working_models:
+            st.success(f"✅ 找到 {len(st.session_state.working_models)} 個可用模型！")
+            final_selection = st.radio(
+                "請選擇一個 (這些都是確定能用的)：",
+                st.session_state.working_models
+            )
+        else:
+            st.warning("⚠️ Google 全線崩潰，已自動切換至「本機備用模式」。")
+            final_selection = "Local (本機備用)"
     else:
         st.markdown("等待掃描中...")
 
 # ==========================================
-# 👉 右側主畫面：只有選好模型才會顯示
+# 👉 右側主畫面
 # ==========================================
-st.title("📄 文獻分析工作區")
+st.title("📄 文獻分析工作區 (健檢版)")
 
-if not st.session_state.scan_done:
-    # 尚未掃描時的畫面
-    st.info("⬅️ 請先在左側點擊 **「🔍 立即掃描可用模型」** 開始。")
-    st.markdown("這樣可以確保我們找到一個「有空」的模型，避免輸入資料後才發現連線失敗。")
-
+if not st.session_state.scan_performed:
+    st.info("⬅️ 請先在左側點擊 **「🚀 執行深度掃描」**。")
+    st.markdown("""
+    **為什麼要這麼做？**
+    先前的掃描只是列出名字，沒有檢查額度。
+    這次我們會真的去「敲門」，確認對方有空才讓你選，避免你白忙一場。
+    """)
 else:
-    # 掃描完成，顯示輸入框
-    st.success(f"🚀 系統準備就緒！目前使用核心：**{selected_model if selected_model else '本機演算法'}**")
+    # 顯示輸入框
+    st.success(f"🚀 當前使用核心：**{final_selection}**")
     
-    raw_text = st.text_area("請在此貼上文獻資料 (每篇請換行)：", height=300, placeholder="將摘要貼在這裡...")
+    raw_text = st.text_area("請在此貼上文獻資料 (每篇請換行)：", height=300)
 
-    # --- 分析函數 ---
-    def run_analysis(text, model_name):
-        # 如果是本機模式
+    # 分析函數
+    def run_analysis_smart(text, model_name):
         if model_name == "Local (本機備用)":
             try:
                 return jieba.analyse.extract_tags(text, topK=15, allowPOS=('n', 'vn', 'v'))
@@ -111,7 +136,7 @@ else:
                 words = [clean[i:i+2] for i in range(len(clean)-1)]
                 return [w for w, c in Counter(words).most_common(15)]
         
-        # 如果是 Google 模式
+        # Google 模式
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={USER_API_KEY}"
         headers = {'Content-Type': 'application/json'}
         prompt = f"任務：歸納 10 個學術研究構面關鍵字。規則：只列出名詞，用頓號隔開。排除無關詞彙(如日期、下午)。內容：{text[:5000]}"
@@ -121,8 +146,6 @@ else:
             response = requests.post(url, headers=headers, json=data)
             if response.status_code == 200:
                 return response.json()['candidates'][0]['content']['parts'][0]['text']
-            elif response.status_code == 429:
-                return "QUOTA_FULL"
             else:
                 return None
         except:
@@ -132,51 +155,39 @@ else:
         lines = text.strip().split('\n')
         return [{"title": line[:15], "content": line} for line in lines if len(line) > 5]
 
-    # 執行按鈕
     if st.button("🚀 開始分析", type="primary"):
         if not raw_text:
             st.warning("請先輸入資料！")
         else:
             keywords = []
-            
-            with st.spinner(f"正在使用 {selected_model} 進行分析..."):
-                result = run_analysis(raw_text, selected_model)
+            with st.spinner(f"正在分析..."):
+                res = run_analysis_smart(raw_text, final_selection)
                 
-                if result == "QUOTA_FULL":
-                    st.error("❌ 哎呀！這個模型的額度剛好滿了 (429)。")
-                    st.info("💡 建議：請在左側換另一個模型試試看（例如從 Flash 換成 Pro）。")
-                elif result and isinstance(result, str):
-                    # Google 成功回傳字串
-                    keywords = [k.strip() for k in result.replace("\n", "、").split("、") if k.strip()]
-                    st.success("✅ AI 分析成功！")
-                elif isinstance(result, list):
-                    # 本機回傳列表
-                    keywords = result
-                    st.success("✅ 本機運算成功！")
+                if isinstance(res, str):
+                    keywords = [k.strip() for k in res.replace("\n", "、").split("、") if k.strip()]
+                    st.success("✅ 分析成功")
+                elif isinstance(res, list):
+                    keywords = res
+                    st.success("✅ 本機運算成功")
                 else:
-                    st.error("❌ 連線發生未知錯誤，請嘗試切換其他模型。")
+                    st.error("❌ 哎呀，剛測過能用，結果現在又滿了。請重試一次或切換模型。")
 
-            # --- 顯示結果 ---
             if keywords:
-                final_keywords = st.multiselect("分析準則 (可調整)", options=keywords, default=keywords)
-                
+                final_keywords = st.multiselect("分析準則", options=keywords, default=keywords)
                 if final_keywords:
                     lit_data = parse_text(raw_text)
                     matrix = {}
                     labels = []
                     titles = []
-                    
                     for i, item in enumerate(lit_data):
                         lbl = string.ascii_uppercase[i % 26]
                         labels.append(lbl)
                         titles.append(item['title'])
-                        col_res = ["○" if k in item['content'] else "" for k in final_keywords]
-                        matrix[lbl] = col_res
+                        matrix[lbl] = ["○" if k in item['content'] else "" for k in final_keywords]
                     
                     df = pd.DataFrame(matrix, index=final_keywords)
                     df_legend = pd.DataFrame({"代號": labels, "文獻": titles})
                     
-                    st.divider()
                     c1, c2 = st.columns([2, 1])
                     with c1: st.dataframe(df, use_container_width=True)
                     with c2: st.dataframe(df_legend, hide_index=True)
