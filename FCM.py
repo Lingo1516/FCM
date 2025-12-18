@@ -7,12 +7,12 @@ import re
 from io import BytesIO
 
 # --- 1. 基礎設定 ---
-st.set_page_config(page_title="MCDM 矩陣回歸版", layout="wide", page_icon="📊")
+st.set_page_config(page_title="MCDM 全功能分析系統", layout="wide", page_icon="💎")
 
 # --- 2. 側邊欄 ---
 with st.sidebar:
-    st.header("📊 設定")
-    st.info("此版本已修復：矩陣圖 (黑點點) 與 作者對照表 (A, B, C) 將完整呈現。")
+    st.header("💎 全功能設定")
+    st.info("此版本為「全配版」，同時包含：原始池(50)、收斂邏輯(15)、矩陣圖(●) 與文獻對照。")
     
     api_key = st.text_input("Google API Key", type="password")
     st.divider()
@@ -20,59 +20,63 @@ with st.sidebar:
     
     c1, c2 = st.columns(2)
     with c1:
-        pool_size = st.number_input("Step 1 原始數量", value=50)
+        pool_size = st.number_input("原始發散數量", value=50)
     with c2:
-        target_size = st.number_input("Step 2 收斂數量", value=15)
+        target_size = st.number_input("最終收斂數量", value=15)
 
-# --- 3. 自動找模型 (防 404) ---
+# --- 3. 自動適配模型 ---
 def get_best_model(key):
     url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
     try:
         response = requests.get(url)
         if response.status_code == 200:
             models = response.json().get('models', [])
-            # 優先找 Pro (邏輯好)，沒有就找 Flash (速度快)，再沒有就隨便抓
-            priority = ['gemini-1.5-pro', 'gemini-1.5-flash', 'gemini-1.0-pro']
-            
-            # 建立可用模型清單
-            available = [m['name'] for m in models if 'generateContent' in m.get('supportedGenerationMethods', [])]
-            
-            # 依照優先順序媒合
-            for p in priority:
-                for a in available:
-                    if p in a: return a
-            
-            return available[0] if available else None
+            # 優先權：Pro (邏輯好) > Flash (速度快)
+            for m in models:
+                if 'gemini-1.5-pro' in m['name']: return m['name']
+            for m in models:
+                if 'gemini-1.5-flash' in m['name']: return m['name']
+            for m in models:
+                if 'gemini' in m['name'] and 'generateContent' in m.get('supportedGenerationMethods', []):
+                    return m['name']
+            return None
         return None
     except:
         return None
 
-# --- 4. 核心分析邏輯 (矩陣專用) ---
-def run_matrix_analysis(text, key, model_name, topic, pool_n, target_n):
+# --- 4. 核心分析邏輯 (一次生成所有資料) ---
+def run_all_in_one_analysis(text, key, model_name, topic, pool_n, target_n):
     url = f"https://generativelanguage.googleapis.com/v1beta/{model_name}:generateContent?key={key}"
     headers = {'Content-Type': 'application/json'}
     
     prompt = f"""
     你是一個 MCDM 研究專家。題目：{topic}。
-    請閱讀文獻，並產生一個「準則 vs 文獻」的矩陣資料。
+    請閱讀文獻，並執行完整的「發散 -> 收斂 -> 矩陣」流程。
 
-    【步驟 1】：先辨識文獻中有幾篇不同的論文，並給予編號 (0, 1, 2...) 與 APA 格式。
-    【步驟 2】：找出約 {pool_n} 個原始準則。
-    【步驟 3】：歸納出 {target_n} 個「最終準則」，並指明每一項準則出現在「哪幾篇論文 (編號)」中。
+    【任務要求】：
+    1. 辨識文獻並編號 (ID 0, 1, 2...)，轉為 APA 格式。
+    2. Step 1: 從文中找出約 {pool_n} 個「原始細項準則」。
+    3. Step 2: 將其歸納為 {target_n} 個「最終準則」。
+       - 必須說明每個最終準則是由哪些原始項目合併的。
+       - 必須說明合併/收斂的理由 (Reasoning)。
+    4. Step 3: 建立矩陣關係，指出每個最終準則出現在哪幾篇論文中 (Paper IDs)。
 
-    【回傳格式 JSON Only】：
+    【回傳 JSON 格式 (嚴格遵守)】：
     {{
       "papers": [
         {{ "id": 0, "apa": "作者A (2024). 標題..." }},
         {{ "id": 1, "apa": "作者B (2023). 標題..." }}
       ],
-      "step1_raw_pool": [ "原始準則1", "原始準則2", ... ],
-      "step2_matrix": [
+      "step1_raw_pool": [ "細項1", "細項2", "細項3", ... ],
+      "step2_convergence": [
         {{
-          "final_name": "最終準則名稱 (如：服務品質)",
-          "matched_paper_ids": [0, 2] // 代表第0篇和第2篇有提到
+          "id": 1,
+          "final_name": "最終準則名稱 (如: 營運成本)",
+          "source_raw_items": ["細項1", "細項5"],
+          "reasoning": "因為皆涉及財務支出...",
+          "matched_paper_ids": [0, 2] 
         }},
-        ...
+        ... (共 {target_n} 個)
       ]
     }}
     
@@ -87,106 +91,123 @@ def run_matrix_analysis(text, key, model_name, topic, pool_n, target_n):
         if response.status_code == 200:
             try:
                 res_text = response.json()['candidates'][0]['content']['parts'][0]['text']
-                # 清洗 JSON
                 match = re.search(r'\{.*\}', res_text, re.DOTALL)
                 if match:
                     return "OK", json.loads(match.group(0))
                 else:
-                    return "ERROR", "無法解析 JSON 結構"
+                    return "ERROR", "JSON 解析失敗"
             except:
-                return "ERROR", "AI 回傳格式異常"
+                return "ERROR", "AI 回傳結構異常"
         else:
             return "ERROR", f"API Error: {response.status_code}"
     except Exception as e:
         return "ERROR", str(e)
 
 # --- 5. 主畫面 ---
-st.title("📊 MCDM 準則矩陣生成器")
+st.title("💎 MCDM 完整研究報告生成器")
 
 raw_text = st.text_area("請貼上文獻摘要：", height=250)
 
-if st.button("🚀 生成矩陣與對照表", type="primary"):
+if st.button("🚀 執行全功能分析", type="primary"):
     if not api_key:
         st.error("❌ 請輸入 Key")
     elif not raw_text:
         st.warning("⚠️ 請輸入文獻")
     else:
-        with st.spinner("🔍 正在重建矩陣與作者名單..."):
+        with st.spinner("🔍 AI 正在處理：發散(50) -> 收斂(15) -> 矩陣建構..."):
             valid_model = get_best_model(api_key)
             
             if not valid_model:
-                st.error("❌ 找不到可用模型 (Key 可能權限不足)")
+                st.error("❌ 找不到可用模型")
             else:
-                status, result = run_matrix_analysis(raw_text, api_key, valid_model, thesis_topic, pool_size, target_size)
+                status, result = run_all_in_one_analysis(raw_text, api_key, valid_model, thesis_topic, pool_size, target_size)
                 
                 if status == "OK":
-                    st.success("✅ 生成成功！")
+                    st.success("✅ 分析完成！所有表格已生成。")
                     
-                    # 1. 解析論文清單 (建立 A, B, C...)
+                    # 準備資料
                     papers = result.get("papers", [])
-                    paper_map = {} # id -> "A"
-                    legend_data = []
+                    raw_pool = result.get("step1_raw_pool", [])
+                    conv_data = result.get("step2_convergence", [])
                     
+                    # 建立代號對照 Map (id -> A, B, C...)
+                    id_to_code = {}
+                    legend_rows = []
                     for idx, p in enumerate(papers):
                         code = string.ascii_uppercase[idx % 26]
-                        p_id = p.get("id")
-                        paper_map[p_id] = code
-                        legend_data.append({"代號": code, "文獻來源 (APA)": p.get("apa")})
+                        id_to_code[p['id']] = code
+                        legend_rows.append({"代號": code, "文獻來源 (APA)": p['apa']})
                     
-                    df_legend = pd.DataFrame(legend_data)
+                    df_legend = pd.DataFrame(legend_rows)
                     
-                    # 2. 解析矩陣 (建立黑點點)
-                    matrix_data = result.get("step2_matrix", [])
-                    rows = []
+                    # --- 建立 4 個分頁 ---
+                    t1, t2, t3, t4 = st.tabs([
+                        "1️⃣ Step 1: 原始列表 (50)", 
+                        "2️⃣ Step 2: 收斂邏輯 (15)", 
+                        "3️⃣ Step 3: 分析矩陣圖", 
+                        "4️⃣ 文獻代號對照"
+                    ])
                     
-                    # 準備所有的欄位 A, B, C...
-                    all_codes = [d["代號"] for d in legend_data]
-                    
-                    for item in matrix_data:
-                        row = {"最終準則名稱": item.get("final_name")}
-                        matched_ids = item.get("matched_paper_ids", [])
-                        
-                        # 填入黑點
-                        for code in all_codes:
-                            # 找出這個 code 對應的 id
-                            # (這裡簡單處理，假設順序一致)
-                            # 嚴謹作法：反查
-                            target_id = -1
-                            for pid, pcode in paper_map.items():
-                                if pcode == code:
-                                    target_id = pid
-                                    break
+                    # Tab 1: 原始池
+                    with t1:
+                        if raw_pool:
+                            df_raw = pd.DataFrame({"序號": range(1, len(raw_pool)+1), "原始細項準則": raw_pool})
+                            st.dataframe(df_raw, hide_index=True, use_container_width=True)
+                        else:
+                            st.warning("無資料")
                             
-                            if target_id in matched_ids:
-                                row[code] = "●"
-                            else:
-                                row[code] = ""
-                        rows.append(row)
+                    # Tab 2: 收斂邏輯
+                    with t2:
+                        conv_rows = []
+                        for item in conv_data:
+                            conv_rows.append({
+                                "序號": item.get("id"),
+                                "最終準則": item.get("final_name"),
+                                "涵蓋之原始細項": ", ".join(item.get("source_raw_items", [])),
+                                "收斂/合併理由": item.get("reasoning")
+                            })
+                        df_conv = pd.DataFrame(conv_rows)
+                        st.dataframe(df_conv, hide_index=True, use_container_width=True)
                         
-                    df_matrix = pd.DataFrame(rows)
-                    
-                    # --- 顯示結果 ---
-                    
-                    st.subheader("1️⃣ 分析矩陣 (準則 vs 文獻)")
-                    st.dataframe(df_matrix, hide_index=True, use_container_width=True)
-                    
-                    st.subheader("2️⃣ 文獻代號對照表")
-                    st.dataframe(df_legend, hide_index=True, use_container_width=True)
-                    
+                    # Tab 3: 矩陣圖
+                    with t3:
+                        matrix_rows = []
+                        all_codes = [d["代號"] for d in legend_rows]
+                        
+                        for item in conv_data:
+                            row = {"最終準則名稱": item.get("final_name")}
+                            matched = item.get("matched_paper_ids", [])
+                            
+                            for code in all_codes:
+                                # 反查 code 對應的 id
+                                target_id = -1
+                                for pid, pcode in id_to_code.items():
+                                    if pcode == code: target_id = pid
+                                
+                                if target_id in matched:
+                                    row[code] = "●"
+                                else:
+                                    row[code] = ""
+                            matrix_rows.append(row)
+                        
+                        df_matrix = pd.DataFrame(matrix_rows)
+                        st.dataframe(df_matrix, hide_index=True, use_container_width=True)
+                        
+                    # Tab 4: 文獻對照
+                    with t4:
+                        st.dataframe(df_legend, hide_index=True, use_container_width=True)
+                        
                     # --- 下載 ---
+                    st.divider()
                     output = BytesIO()
                     try:
                         import xlsxwriter
                         with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-                            df_matrix.to_excel(writer, sheet_name='矩陣圖', index=False)
-                            df_legend.to_excel(writer, sheet_name='文獻對照', index=False)
-                            
-                            # 原始 Step 1 池子也放進去
-                            raw_pool = result.get("step1_raw_pool", [])
-                            if raw_pool:
-                                pd.DataFrame({"原始準則": raw_pool}).to_excel(writer, sheet_name='原始準則池', index=False)
-                                
-                        st.download_button("📥 下載 Excel (含矩陣與APA)", output.getvalue(), "mcdm_matrix.xlsx", type="primary")
+                            if raw_pool: df_raw.to_excel(writer, sheet_name='Step1_原始(50)', index=False)
+                            if conv_data: df_conv.to_excel(writer, sheet_name='Step2_收斂(15)', index=False)
+                            if conv_data: df_matrix.to_excel(writer, sheet_name='Step3_矩陣', index=False)
+                            df_legend.to_excel(writer, sheet_name='文獻對照表', index=False)
+                        st.download_button("📥 下載完整 Excel (含所有分頁)", output.getvalue(), "mcdm_full_report.xlsx", type="primary")
                     except:
                         st.error("Excel 匯出模組錯誤")
 
