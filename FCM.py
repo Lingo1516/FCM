@@ -3,7 +3,7 @@ import pandas as pd
 import requests
 import string
 import re
-import time
+import time # 這是關鍵，用來控制速度
 from collections import Counter
 from io import BytesIO
 
@@ -19,117 +19,128 @@ except ImportError:
 USER_API_KEY = "AIzaSyBlj24gBVr3RJhkukS9p6yo5s2-WVBH2H0" 
 
 # --- 2. 頁面設定 ---
-st.set_page_config(page_title="AI 溫柔分析版", layout="wide", page_icon="🕊️")
+st.set_page_config(page_title="AI 智慧篩選分析", layout="wide", page_icon="🕵️")
 
-if 'model_list' not in st.session_state:
-    st.session_state.model_list = []
-if 'list_loaded' not in st.session_state:
-    st.session_state.list_loaded = False
+if 'verified_models' not in st.session_state:
+    st.session_state.verified_models = []
+if 'filter_done' not in st.session_state:
+    st.session_state.filter_done = False
 
 # ==========================================
-# 🛑 左側邊欄：溫柔選單
+# 🛑 左側邊欄：智慧篩選站
 # ==========================================
 with st.sidebar:
-    st.header("🕊️ 第一步：選擇模型")
-    st.info("這次我們不暴力測試，而是先列出清單，您選中哪個，我們才測哪個。")
+    st.header("🕵️ 第一步：智慧篩選")
+    st.info("點擊下方按鈕，系統會「慢速」逐一測試，只幫您留下真正能用的模型。")
     
-    # 1. 獲取清單函數 (不耗額度)
-    def fetch_model_list(key):
-        url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
-        try:
-            response = requests.get(url)
-            if response.status_code == 200:
-                data = response.json()
-                valid_list = []
-                for m in data.get('models', []):
-                    # 只抓 gemini 系列
-                    if 'generateContent' in m.get('supportedGenerationMethods', []) and 'gemini' in m['name']:
-                        valid_list.append(m['name'].replace("models/", ""))
-                return valid_list
-            else:
-                return []
-        except:
-            return []
-
-    # 2. 載入清單按鈕
-    if st.button("📋 載入模型清單 (不耗額度)", type="primary"):
-        with st.spinner("正在讀取 Google 菜單..."):
-            models = fetch_model_list(USER_API_KEY)
-            if models:
-                st.session_state.model_list = models
-                st.session_state.list_loaded = True
-                st.success(f"讀取成功！共有 {len(models)} 個選擇。")
-            else:
-                st.error("無法讀取清單，請檢查網路或金鑰。")
-    
-    st.divider()
-    
-    # 3. 讓使用者選擇
-    selected_model = None
-    if st.session_state.list_loaded:
-        st.subheader("👇 請選擇一個模型：")
-        
-        # 預設選 flash (通常最穩)
-        default_idx = 0
-        for i, m in enumerate(st.session_state.model_list):
-            if "flash" in m and "1.5" in m:
-                default_idx = i
-                break
-                
-        selected_model = st.radio(
-            "點擊選擇後，系統會自動測試該模型：",
-            st.session_state.model_list,
-            index=default_idx
-        )
-        
-        # 4. 單點測試 (只測這一個！)
-        st.markdown("---")
-        st.caption(f"正在測試連線：`{selected_model}` ...")
-        
-        # 實測連線
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{selected_model}:generateContent?key={USER_API_KEY}"
+    # 測試單一模型函數
+    def test_single_model(key, model_name):
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={key}"
         headers = {'Content-Type': 'application/json'}
         data = {"contents": [{"parts": [{"text": "Hi"}]}]}
-        
         try:
-            # 設定 3 秒超時，避免卡太久
-            resp = requests.post(url, headers=headers, json=data, timeout=3)
-            
-            if resp.status_code == 200:
-                st.success("🟢 此模型連線正常！請至右側使用。")
-                active_status = True
-            elif resp.status_code == 429:
-                st.error("🔴 此模型額度已滿 (429)，請換一個選。")
-                active_status = False
+            # 設定超時
+            response = requests.post(url, headers=headers, json=data, timeout=5)
+            if response.status_code == 200:
+                return True
             else:
-                st.error(f"❌ 連線失敗 ({resp.status_code})")
-                active_status = False
-        except Exception as e:
-            st.error("❌ 網路連線錯誤")
-            active_status = False
+                return False
+        except:
+            return False
 
+    # 執行篩選按鈕
+    if st.button("🔍 開始自動篩選 (約需 10 秒)", type="primary"):
+        st.session_state.verified_models = []
+        
+        # 我們只挑這幾個「精英模型」來測，不要測垃圾模型浪費時間
+        candidates = [
+            "gemini-1.5-flash",       # 最快、最穩
+            "gemini-1.5-pro",         # 最聰明
+            "gemini-2.0-flash",       # 最新版
+            "gemini-2.0-flash-lite-preview-02-05", # 預覽輕量版(通常沒人用，額度多)
+            "gemini-1.0-pro",         # 經典舊版
+            "gemini-1.5-flash-8b"     # 極速版
+        ]
+        
+        progress_bar = st.progress(0)
+        status_text = st.empty()
+        
+        found_count = 0
+        
+        for i, model in enumerate(candidates):
+            status_text.markdown(f"正在測試：`{model}` ...")
+            
+            # 1. 測試
+            is_alive = test_single_model(USER_API_KEY, model)
+            
+            # 2. 判定
+            if is_alive:
+                st.session_state.verified_models.append(model)
+                found_count += 1
+                st.toast(f"✅ {model} 可用！")
+            
+            # 3. 更新進度
+            progress_bar.progress((i + 1) / len(candidates))
+            
+            # 4. 【關鍵】暫停 1.5 秒，避免被 Google 鎖 IP
+            time.sleep(1.5)
+            
+        st.session_state.filter_done = True
+        status_text.text("篩選完成！")
+        
+        if found_count == 0:
+            st.error("❌ 全部忙線中，請稍後再試或用本機模式。")
+
+    st.divider()
+    
+    # 顯示「乾淨」的選單
+    final_selection = None
+    
+    if st.session_state.filter_done:
+        if st.session_state.verified_models:
+            st.success(f"🎉 成功找到 {len(st.session_state.verified_models)} 個可用模型！")
+            st.caption("以下列表保證剛剛測試是綠燈的：")
+            final_selection = st.radio(
+                "請選擇一個開始分析：",
+                st.session_state.verified_models
+            )
+        else:
+            st.warning("⚠️ 為了不讓你空手而歸，已自動切換至「本機備用模式」。")
+            final_selection = "Local (本機備用)"
     else:
-        st.markdown("等待載入清單...")
-        active_status = False
+        st.markdown("等待篩選中...")
 
 # ==========================================
 # 👉 右側主畫面
 # ==========================================
 st.title("📄 文獻分析工作區")
 
-if not active_status:
-    if st.session_state.list_loaded:
-        st.warning("⚠️ 左側選中的模型目前無法使用，請試試看清單中的其他選項。")
-    else:
-        st.info("⬅️ 請先在左側點擊 **「📋 載入模型清單」**。")
+if not st.session_state.filter_done:
+    st.info("⬅️ 請先在左側點擊 **「🔍 開始自動篩選」**。")
+    st.markdown("""
+    **這個版本會自動幫您：**
+    1. 測試目前最熱門的 6 個模型。
+    2. 自動過濾掉壞掉的、額度滿的。
+    3. **只列出能用的給您選**。
+    """)
 else:
-    # 只有綠燈才會顯示這裡
-    st.success(f"🚀 已鎖定核心：**{selected_model}**")
+    # 只有篩選過才會顯示這裡
+    st.success(f"🚀 已鎖定核心：**{final_selection}**")
     
     raw_text = st.text_area("請在此貼上文獻資料 (每篇請換行)：", height=300)
 
     # 分析函數
     def run_analysis_final(text, model_name):
+        # 本機模式
+        if "Local" in model_name:
+            try:
+                return jieba.analyse.extract_tags(text, topK=15, allowPOS=('n', 'vn', 'v'))
+            except:
+                clean = re.sub(r'[^\u4e00-\u9fa5]', '', text)
+                words = [clean[i:i+2] for i in range(len(clean)-1)]
+                return [w for w, c in Counter(words).most_common(15)]
+
+        # Google 模式
         url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={USER_API_KEY}"
         headers = {'Content-Type': 'application/json'}
         prompt = f"任務：歸納 10 個學術研究構面關鍵字。規則：只列出名詞，用頓號隔開。排除無關詞彙(如日期、下午)。內容：{text[:5000]}"
@@ -153,16 +164,17 @@ else:
             st.warning("請先輸入資料！")
         else:
             keywords = []
-            with st.spinner(f"正在使用 {selected_model} 分析..."):
-                res = run_analysis_final(raw_text, selected_model)
+            with st.spinner(f"正在使用 {final_selection} 分析..."):
+                res = run_analysis_final(raw_text, final_selection)
                 
-                if res:
+                if isinstance(res, str): # Google 回傳字串
                     keywords = [k.strip() for k in res.replace("\n", "、").split("、") if k.strip()]
                     st.success("✅ 分析成功")
+                elif isinstance(res, list): # 本機回傳 List
+                    keywords = res
+                    st.success("✅ 本機運算成功")
                 else:
-                    st.error("❌ 分析中途斷線，可能剛好額度滿了，請稍後再試。")
-                    # 備用方案提示
-                    st.info("💡 如果一直失敗，可能是今日額度用盡，請明天再來。")
+                    st.error("❌ 分析失敗，該模型可能剛好額度用盡，請左側換一個試試。")
 
             if keywords:
                 final_keywords = st.multiselect("分析準則", options=keywords, default=keywords)
